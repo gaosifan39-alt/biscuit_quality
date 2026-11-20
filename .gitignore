@@ -1,0 +1,6 @@
+.vercel/
+node_modules/
+.env
+.env.*
+*.xlsx
+.DS_Store
