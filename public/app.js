@@ -45,7 +45,7 @@
   }
   const round = () => state.rounds.find(r => r.id === state.active);
   let page = "workspace", showNote = false, toastTimer, recognition = null;
-  let dialogText = "", modal = "", lastFocused = null;
+  let applyAfterRecording = false, lastFocused = null;
   const dialog = $("#dialog");
   function notify(message) {
     $("#toast").textContent = message;
@@ -72,6 +72,7 @@
   function stopRecognition() {
     const active = recognition;
     recognition = null;
+    applyAfterRecording = false;
     if (active) { try { active.abort(); } catch {} }
   }
   const knownPages = ["workspace","records","settings"];
@@ -130,8 +131,7 @@
     return '<div class="settings-grid"><section class="panel setting-card"><h2 class="card-title">本机场次</h2><label class="field">选择场次<select id="round-select">'+options+'</select></label><dl class="summary-list"><dt>盲评样品</dt><dd>'+r.samples.length+' 份</dd><dt>评价性状</dt><dd>'+r.traits.map(esc).join("、")+'</dd><dt>已确认评价</dt><dd>'+r.records.length+' 条</dd></dl><div class="settings-actions"><button class="action" data-action="new-round">'+icon("plus")+'新建场次</button><button class="ghost" data-action="mapping">'+icon("eye")+'组织者对照表</button></div></section>'+
       '<section class="panel setting-card"><h2 class="card-title">当前评价员</h2><p class="help">同一设备可以轮流试吃。换人时输入不同的姓名或代号，各自的评价会单独记录。</p><form id="rater-form"><label class="field">姓名或代号<input name="rater" value="'+esc(r.rater)+'" maxlength="40" required></label><button class="ghost">保存评价员</button></form></section></div>';
   }
-  function openModal(kind, title, content, focusSelector) {
-    modal = kind;
+  function openModal(title, content, focusSelector) {
     if (!dialog.open) lastFocused = document.activeElement;
     $("#dialog-inner").innerHTML = '<div class="dialog-title"><h2 id="dialog-title">'+esc(title)+'</h2><button class="close" aria-label="关闭" data-action="close">'+icon("close")+'</button></div>'+content;
     dialog.setAttribute("aria-labelledby","dialog-title");
@@ -140,17 +140,16 @@
   }
   dialog.addEventListener("close",() => {
     stopRecognition();
-    modal = "";
     if (lastFocused?.isConnected) lastFocused.focus();
   });
   function openSamples() {
     const r = round();
-    openModal("samples","切换样品",'<p class="help">选择与你手中样品标签一致的盲码。</p><div class="sample-grid">'+r.samples.map((s,i)=>'<button data-sample="'+i+'" aria-pressed="'+(r.current===s.code)+'">'+esc(s.code)+'<small>'+(M.findRecord(r,s.code)?"已评价":"待评价")+'</small></button>').join("")+'</div>');
+    openModal("切换样品",'<p class="help">选择与你手中样品标签一致的盲码。</p><div class="sample-grid">'+r.samples.map((s,i)=>'<button data-sample="'+i+'" aria-pressed="'+(r.current===s.code)+'">'+esc(s.code)+'<small>'+(M.findRecord(r,s.code)?"已评价":"待评价")+'</small></button>').join("")+'</div>');
   }
   function voiceEditor(startMic = false) {
     const r = round();
-    dialogText = M.draft(r).transcript || "";
-    openModal("speech","口述评分 · "+r.current,'<p class="help">每项说出性状名称和分数，可一次说多项。浏览器的语音服务可能联网处理声音。</p><label class="field">口述文本<textarea id="speech-text" maxlength="2000" rows="4" placeholder="例如：'+esc(r.traits[0])+'八分">'+esc(dialogText)+'</textarea></label><p class="issues" id="speech-feedback" role="status"></p><div class="group-actions"><button class="ghost" id="record-btn" data-action="record">'+icon("mic")+'开始录音</button><button class="action" data-action="parse">填入评分表</button></div>',startMic ? "#record-btn" : "#speech-text");
+    const dialogText = M.draft(r).transcript || "";
+    openModal("口述评分 · "+r.current,'<p class="help">每项说出性状名称和分数，可一次说多项。浏览器的语音服务可能联网处理声音。</p><label class="field">口述文本<textarea id="speech-text" maxlength="2000" rows="4" placeholder="例如：'+esc(r.traits[0])+'八分">'+esc(dialogText)+'</textarea></label><p class="issues" id="speech-feedback" role="status"></p><div class="group-actions"><button class="ghost" id="record-btn" data-action="record">'+icon("mic")+'开始录音</button><button class="action" data-action="parse">填入评分表</button></div>',startMic ? "#record-btn" : "#speech-text");
     if (startMic) startRecording();
   }
   function startRecording() {
@@ -173,6 +172,10 @@
       if(recognition !== rec) return;
       recognition = null; field.readOnly = false;
       $("#record-btn").innerHTML = icon("mic")+"继续录音";
+      if (applyAfterRecording) {
+        applyAfterRecording = false;
+        if (!failed) { applyTranscript(); return; }
+      }
       if(!failed) feedback.textContent = field.value.trim() ? "录音已结束，可编辑文本并填入评分表。" : "未收到语音，请重试或输入文字。";
     }});
     if(!rec) { feedback.textContent = "此浏览器未提供语音识别。可使用输入法的语音键口述，或直接输入文字。"; field.focus(); return; }
@@ -188,20 +191,27 @@
     }
   }
   function applyTranscript() {
-    if (recognition) { recognition.stop(); $("#speech-feedback").textContent = "正在结束录音，请在转写完成后填入。"; return; }
+    if (recognition) {
+      applyAfterRecording = true;
+      $("#speech-feedback").textContent = "正在取得本次录音的最终转写…";
+      recognition.stop();
+      return;
+    }
     const r = round(), text = $("#speech-text").value.trim();
     const parsed = TasterVoice.parse(text,r.traits);
     if (parsed.issues.length || !Object.keys(parsed.scores).length) {
-      $("#speech-feedback").textContent = parsed.issues.join("\\n").replaceAll("\\n","\n") || "请说出或输入性状名称和分数。";
+      $("#speech-feedback").textContent = parsed.issues.join("\n") || "请说出或输入性状名称和分数。";
       return;
     }
     const d = M.draft(r);
     Object.assign(d.scores,parsed.scores);
     delete d.transcript;
-    persist(); dialog.close(); render(); notify("已填入 "+Object.keys(parsed.scores).length+" 项评分，请核对后确认。");
+    const missing = r.traits.filter(t => !M.valid(d.scores[t]));
+    persist(); dialog.close(); render();
+    notify(missing.length ? "还差"+missing.join("、")+"，可继续口述或点选。" : "评分已填齐，请核对后确认。");
   }
   function newRoundForm() {
-    openModal("new","新建盲评场次",'<form id="new-form"><label class="field">场次名称<input name="title" placeholder="例如：冬小麦饼干第一轮" maxlength="60" required></label><label class="field">品种名称<textarea name="names" rows="4" required maxlength="10000" placeholder="每行一个品种"></textarea><small>输入 1–200 个品种。创建后会随机分配盲码，请按对照表为实物贴签。</small></label><label class="field">评价性状<input name="traits" required maxlength="250" value="'+M.traits.join("、")+'"><small>用顿号或逗号分隔，最多 12 项，每项按 1–10 分评价。</small></label><p id="form-feedback" class="issues" role="status"></p><div class="group-actions"><button class="action">创建场次</button></div></form>',"input");
+    openModal("新建盲评场次",'<form id="new-form"><label class="field">场次名称<input name="title" placeholder="例如：冬小麦饼干第一轮" maxlength="60" required></label><label class="field">品种名称<textarea name="names" rows="4" required maxlength="10000" placeholder="每行一个品种"></textarea><small>输入 1–200 个品种。创建后会随机分配盲码，请按对照表为实物贴签。</small></label><label class="field">评价性状<input name="traits" required maxlength="250" value="'+M.traits.join("、")+'"><small>用顿号或逗号分隔，最多 12 项，每项按 1–10 分评价。</small></label><p id="form-feedback" class="issues" role="status"></p><div class="group-actions"><button class="action">创建场次</button></div></form>',"input");
   }
   function createRound(form) {
     const data = new FormData(form), title = data.get("title").trim();
@@ -216,12 +226,12 @@
   }
   function showMapping() {
     const r = round();
-    openModal("mapping","组织者盲码对照表",'<p class="help">请按此表为实体样品贴签，完成后关闭对照表再交给评价员。</p><div class="table-wrap"><table><thead><tr><th>样品盲码</th><th>小麦品种</th></tr></thead><tbody>'+r.samples.map((s,i)=>'<tr><td>'+esc(s.code)+'</td><td><input aria-label="'+esc(s.code)+' 对应品种" data-mapping="'+i+'" maxlength="80" value="'+esc(s.name)+'" placeholder="填写实际品种"></td></tr>').join("")+'</tbody></table></div><div class="group-actions"><button class="action" data-action="save-map">保存对照表</button></div>');
+    openModal("组织者盲码对照表",'<p class="help">请按此表为实体样品贴签，完成后关闭对照表再交给评价员。</p><div class="table-wrap"><table><thead><tr><th>样品盲码</th><th>小麦品种</th></tr></thead><tbody>'+r.samples.map((s,i)=>'<tr><td>'+esc(s.code)+'</td><td><input aria-label="'+esc(s.code)+' 对应品种" data-mapping="'+i+'" maxlength="80" value="'+esc(s.name)+'" placeholder="填写实际品种"></td></tr>').join("")+'</tbody></table></div><div class="group-actions"><button class="action" data-action="save-map">保存对照表</button></div>');
   }
   function exportOptions() {
     const r = round();
-    if (!r.records.length) { openModal("export","导出 Excel",'<p class="help">当前场次还没有已确认的评分。完成一份样品并确认后，即可导出评价记录。</p><div class="group-actions"><button class="action" data-action="home">返回工作台</button></div>'); return; }
-    openModal("export","导出 Excel",'<p class="help">将「'+esc(r.title)+'」的 '+r.records.length+' 条已确认评价导出为 .xlsx 文件，保留各评价员的原始分数和备注。</p><label class="checkline"><input type="checkbox" id="export-names">包含真实品种名称（揭盲）</label><div class="group-actions"><button class="action" data-action="download">'+icon("download")+'下载 Excel</button></div>');
+    if (!r.records.length) { openModal("导出 Excel",'<p class="help">当前场次还没有已确认的评分。完成一份样品并确认后，即可导出评价记录。</p><div class="group-actions"><button class="action" data-action="home">返回工作台</button></div>'); return; }
+    openModal("导出 Excel",'<p class="help">将「'+esc(r.title)+'」的 '+r.records.length+' 条已确认评价导出为 .xlsx 文件，保留各评价员的原始分数和备注。</p><label class="checkline"><input type="checkbox" id="export-names">包含真实品种名称（揭盲）</label><div class="group-actions"><button class="action" data-action="download">'+icon("download")+'下载 Excel</button></div>');
   }
   function download() {
     const r = round(), withNames = $("#export-names").checked;
