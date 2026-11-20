@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#254b3b">
+  <meta name="description" content="小麦饼干感官盲评工作台，口述评分、核对性状并导出 Excel。">
+  <title>小小品鉴家 · 饼干盲评工作台</title>
+  <link rel="icon" href="assets/brand.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+  <script defer src="model.js"></script>
+  <script defer src="voice.js"></script>
+  <script defer src="export.js"></script>
+  <script defer src="app.js"></script>
+</head>
+<body>
+  <header class="topbar"><div class="topinner">
+    <a href="#workspace" class="brand" aria-label="小小品鉴家首页"><img src="assets/brand.svg" width="44" height="44" alt=""><span><strong>小小品鉴家</strong><small>LITTLE TASTER</small></span></a>
+    <nav aria-label="主导航">
+      <button data-view="workspace"><i data-icon="grid"></i>盲评工作台</button>
+      <button data-view="records"><i data-icon="list"></i>评价记录</button>
+      <button data-view="settings"><i data-icon="sliders"></i>场次设置</button>
+    </nav>
+    <div class="topactions"><span id="local-status"><span class="statusdot"></span>本机保存</span><button class="export-button" id="export"><i data-icon="download"></i>导出 Excel</button></div>
+  </div></header>
+  <main id="main"></main>
+  <dialog id="dialog"><div id="dialog-inner"></div></dialog>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+</body>
+</html>
