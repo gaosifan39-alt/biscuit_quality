@@ -1,0 +1,22 @@
+const test = require("node:test");
+const assert = require("node:assert/strict");
+require("../public/model.js");
+const { makeRound, draft, confirmScore, findRecord } = globalThis.TasterModel;
+test("partial entries stay in drafts; confirmation advances and edits replace the same rater's row", () => {
+  const round = makeRound({ names: ["甲", "乙"], dimensions: ["裂纹"] });
+  assert.throws(() => confirmScore(round));
+  draft(round).scores["裂纹"] = 8;
+  confirmScore(round);
+  assert.equal(round.current, "B-002");
+  round.current = "B-001";
+  draft(round).scores["裂纹"] = 7;
+  confirmScore(round);
+  round.current = "B-001";
+  assert.equal(findRecord(round).scores["裂纹"], 7);
+  assert.equal(round.records.length, 1);
+  round.rater = "乙";
+  assert.deepEqual(draft(round).scores, {});
+  draft(round).scores["裂纹"] = 9;
+  confirmScore(round);
+  assert.equal(round.records.length, 2);
+});
