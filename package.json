@@ -1,0 +1,9 @@
+{
+  "name": "little-taster",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "start": "node serve.cjs",
+    "test": "node --test"
+  }
+}
