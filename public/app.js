@@ -54,7 +54,11 @@
   const audioURLs = [];
   const dialog = $("#dialog");
   const sharing = TasterShareUI.create(openModal);
-  const cloud = TasterCloud.create(openModal,round);
+  const cloud = TasterCloud.create(openModal,round,template=>templateEditor({initial:template}),blob=>{
+    const url = URL.createObjectURL(blob);
+    audioURLs.push(url);
+    return url;
+  });
   function notify(message) {
     $("#toast").textContent = message;
     $("#toast").classList.add("show");
@@ -94,7 +98,7 @@
     }
     session.capture?.finish();
   }
-  const knownPages = ["workspace","records","community"];
+  const knownPages = ["workspace","records","community","sharing"];
   function navigate(next) {
     if (!knownPages.includes(next)) next = "workspace";
     stopRecognition();
@@ -111,13 +115,14 @@
     const previousId = state.active;
     const r = page === "workspace" && !guest ? M.ensureScoringRound(state) : round();
     if (state.active !== previousId) persist();
-    const names = { workspace:guest?"扫码品鉴":"品鉴工作台", records:"评价记录", community:"模板与共享" };
+    const names = { workspace:guest?"扫码品鉴":"品鉴工作台", records:"本机评分与录音", community:"模板上传", sharing:"数据共享" };
     const meta = '<div class="meta">'+icon("leaf")+esc(r.title)+'<span class="divider"></span>'+icon("user")+esc(r.rater)+'</div>';
     const savedCount = r.records.filter(x => x.rater === r.rater).length;
     const progress = '<div class="progress"><div><span>我的品鉴进度</span><span><b>'+savedCount+'</b> / '+r.samples.length+'</span></div><div class="track"><span style="width:'+100*savedCount/r.samples.length+'%"></span></div></div>';
     $("#main").innerHTML = (storageError ? '<p id="storage-warning" class="inline-status" role="alert">'+esc(storageError)+'</p>' : "")+
-      '<div class="page-heading"><div><h1>'+names[page]+'</h1>'+(page === "community" ? "" : meta)+'</div>'+(page === "workspace" ? progress : "")+'</div>'+
-      (page === "workspace" ? workspace(r) : page === "records" ? recordsPage(r) : communityPage(r));
+      '<div class="page-heading"><div><h1>'+names[page]+'</h1>'+(page === "workspace" || page === "records" ? meta : "")+'</div>'+(page === "workspace" ? progress : "")+'</div>'+
+      (page === "workspace" ? workspace(r) : page === "records" ? recordsPage(r) : page === "sharing" ? sharingPage(r) : communityPage());
+    if (page === "sharing") cloud.directory($("#cloud-directory"));
   }
   function makeWave() {
     const heights = [3,5,3,8,11,7,13,18,10,8,17,25,14,22,31,18,13,27,40,24,18,35,46,30,19,28,42,34,23,15];
@@ -146,7 +151,7 @@
     const food = r.template?.foodType || "小麦饼干";
     const sampleClass = food.includes("饼干") ? "sample" : "sample sample-generic";
     const header = guest
-      ? '<p class="guest-status help">'+(r.records.length>=r.samples.length?"本场评分已全部提交。你可以切换样品查看或更新。":"核对实物盲码后口述或点选评分，分数会提交给本场主办人。")+'</p>'
+      ? '<p class="guest-status help">'+(r.records.length>=r.samples.length?"本场评分已全部提交。你可以切换样品查看或更新。":"核对实物盲码后口述评分。分数齐全后自动提交给主办人，录音随评分提交。")+'</p>'
       : '<section class="panel tasting-bar" aria-label="评鉴对象"><div class="tasting-selection"><span class="trait-icon tone3">'+icon("sample")+'</span><div><p>当前评鉴</p><h2>'+esc(food)+'</h2></div></div>'+
         '<div class="panel-actions"><button class="action" data-action="catalog">'+icon("grid")+'选食品与模板</button><button class="ghost" data-action="organize">'+icon("sliders")+'管理场次</button><button class="ghost" data-action="cloud">扫码收评</button></div></section>';
     return header+
@@ -181,7 +186,7 @@
   }
   function organizeRound(r) {
     openModal("管理场次",roundPicker(r,"round-select")+
-      '<form id="rater-form"><label class="field">更换评价员<input name="rater" value="'+esc(r.rater)+'" maxlength="40" required></label><div class="panel-actions"><button class="ghost">保存评价员</button><button type="button" class="ghost" data-action="mapping">'+icon("eye")+'盲码对照表</button></div></form>');
+      '<form id="rater-form"><label class="field">更换评价员<input name="rater" value="'+esc(r.rater)+'" maxlength="40" required></label><div class="panel-actions"><button class="ghost">保存评价员</button><button type="button" class="ghost" data-action="mapping">'+icon("eye")+'盲码对照表</button><button type="button" class="ghost" data-action="local-records">本机评分与录音</button></div></form>');
   }
   function localTemplates() {
     return state.savedTemplates || [];
@@ -215,16 +220,19 @@
     status.hidden = !input.value.trim();
     status.textContent = matches ? "找到 "+matches+" 个模板" : "没有找到模板。可换个关键词，或新建模板。";
   }
-  function communityPage(r) {
-    return '<div class="settings-grid"><section class="panel setting-card"><h2 class="card-title">数据共享</h2><p class="help">分享评分汇总或数据说明卡，也可接收他人发来的共享文件。</p>'+roundPicker(r,"share-round-select")+
+  function sharingPage(r) {
+    return '<div class="settings-grid"><section class="panel setting-card"><h2 class="card-title">场次模板目录</h2><div id="cloud-directory"></div></section>'+
+      '<section class="panel setting-card"><h2 class="card-title">本机数据</h2><p class="help">分享评分汇总或数据说明卡，也可接收他人发来的共享文件。</p>'+roundPicker(r,"share-round-select")+
       '<p class="help">'+r.records.length+' 条评价 · 原始数据保存在本机</p><div class="panel-actions"><button class="action" data-action="share-data">'+icon("share")+'分享本场数据</button>'+
-      '<button class="ghost" data-action="import-data">接收共享文件</button></div></section>'+
-      '<section class="panel setting-card"><h2 class="card-title">评价模板</h2>'+
+      '<button class="ghost" data-action="import-data">接收共享文件</button></div></section></div>';
+  }
+  function communityPage() {
+    return '<section class="panel setting-card">'+
       '<div class="panel-actions"><button class="action" data-action="blank-template">'+icon("plus")+'新建模板</button><button class="ghost" data-action="import-template">上传或导入模板</button><button class="ghost" data-action="round-template">使用本场规则</button></div>'+
-      catalogPage()+'</section></div>';
+      catalogPage()+'</section>';
   }
   function openCatalog() {
-    openModal("选择食品与模板",catalogPage()+'<div class="group-actions"><button class="ghost" data-action="import-template">导入模板</button><button class="action" data-action="blank-template">'+icon("plus")+'新建模板</button></div>');
+    openModal("选择食品与模板",catalogPage()+'<div class="group-actions"><button class="ghost" data-action="shared-directory">浏览共享模板</button><button class="ghost" data-action="import-template">导入模板</button><button class="action" data-action="blank-template">'+icon("plus")+'新建模板</button></div>');
   }
   function openModal(title, content, focusSelector) {
     clearAudioURLs();
@@ -285,7 +293,8 @@
     const dialogText = M.draft(r).transcript || "";
     const firstRule = M.ruleFor(r,r.traits[0]);
     const firstExample = r.traits[0]+(r.template ? Math.round((firstRule.min+firstRule.max)/2) : "八")+"分";
-    openModal("口述评分 · "+r.current,'<p class="help">连续报性状和分数，停顿后自动填入，分数齐全即保存。原声保存在本机，浏览器的转写服务可能联网处理声音。</p><label class="field">口述文本<textarea id="speech-text" maxlength="2000" rows="4" placeholder="例如：'+esc(firstExample)+'">'+esc(dialogText)+'</textarea></label><p class="issues" id="speech-feedback" role="status"></p><div class="group-actions"><button class="ghost" id="record-btn" data-action="record">'+icon("mic")+'开始录音</button><button class="action" data-action="parse">填入评分表</button></div>',startMic ? "#record-btn" : "#speech-text");
+    const audioHelp = guest ? "评分和录音会提交给本场主办人。" : "原声保存在本机。";
+    openModal("口述评分 · "+r.current,'<p class="help">连续报性状和分数，停顿后自动填入，分数齐全即'+(guest?"提交":"保存")+'。'+audioHelp+'浏览器的转写服务可能联网处理声音。</p><label class="field">口述文本<textarea id="speech-text" maxlength="2000" rows="4" placeholder="例如：'+esc(firstExample)+'">'+esc(dialogText)+'</textarea></label><p class="issues" id="speech-feedback" role="status"></p><div class="group-actions"><button class="ghost" id="record-btn" data-action="record">'+icon("mic")+'开始录音</button><button class="action" data-action="parse">填入评分表</button></div>',startMic ? "#record-btn" : "#speech-text");
     if (startMic) startRecording();
   }
   function requestRecordingEnd(session) {
@@ -313,8 +322,11 @@
       onActivity,
       onResult: (text, finalText) => {
         if (voiceSession !== session || session.ended) return;
-        session.text = text.slice(0,2000).trim();
-        session.finalText = finalText.slice(0,2000).trim();
+        const nextText = text.slice(0,2000).trim();
+        const nextFinal = finalText.slice(0,2000).trim();
+        if (nextText === session.text && nextFinal === session.finalText) return;
+        session.text = nextText;
+        session.finalText = nextFinal;
         if (session.text) field.value = session.text;
         onActivity();
       },
@@ -368,7 +380,14 @@
       const blob = await session.capture?.finish();
       if (voiceSession !== session) return;
       if (blob?.size) {
-        await TasterAudio.save({ roundId: r.id, code, rater }, blob);
+        const sample = { roundId: r.id, code, rater };
+        try { await TasterAudio.save(sample, blob); }
+        catch (error) {
+          if (guest?.round !== r) throw error;
+          const clips = guest.unsavedAudio.get(code) || [];
+          clips.push({id:crypto.randomUUID(),at:Date.now(),blob});
+          guest.unsavedAudio.set(code,clips);
+        }
         recorded = true;
       }
     } catch {}
@@ -380,14 +399,19 @@
     const d = M.draft(r);
     if (recorded) d.hasAudio = true;
     const audioWarning = recorded ? "" : " 本次原声未保存。";
-    if (!finalText || session.error) {
+    const guestVoice = guest?.round === r;
+    if ((!finalText && !(guestVoice && text)) || session.error) {
       if (text) d.transcript = text;
       persist();
       feedback.textContent = (session.error || "未识别到分数，请重说。")+audioWarning;
       return;
     }
-    const parsed = TasterVoice.parse(finalText,r.traits,r.template?.traits,{ autoMatch: true });
-    if (text !== finalText) parsed.issues.push("有一段口述未转写完整，请重说。");
+    let parsed = TasterVoice.parse(guestVoice ? text : finalText,r.traits,r.template?.traits,{ autoMatch: true });
+    if (text !== finalText && (!guestVoice || parsed.issues.length || parsed.suggestions?.length ||
+        r.traits.some(trait => !Object.hasOwn(parsed.scores,trait)))) {
+      parsed = TasterVoice.parse(finalText,r.traits,r.template?.traits,{ autoMatch: true });
+      parsed.issues.push("有一段口述未转写完整，请重说这一项。");
+    }
     Object.assign(d.scores, parsed.scores);
     const missing = r.traits.filter(trait => !M.valid(d.scores[trait],M.ruleFor(r,trait)));
     const needsReview = parsed.issues.length || parsed.suggestions?.length;
@@ -445,7 +469,7 @@
     }
     const r = round(), text = $("#speech-text").value.trim();
     $("#voice-choices")?.remove();
-    const parsed = TasterVoice.parse(text,r.traits,r.template?.traits);
+    const parsed = TasterVoice.parse(text,r.traits,r.template?.traits,{autoMatch:Boolean(guest)});
     if (parsed.suggestions?.length) {
       askAboutWord($("#speech-text"),parsed.suggestions[0]);
       return;
@@ -458,6 +482,7 @@
     Object.assign(d.scores,parsed.scores);
     delete d.transcript;
     const missing = r.traits.filter(t => !M.valid(d.scores[t],M.ruleFor(r,t)));
+    if (guest && !missing.length) { saveCurrentScore(r); return; }
     persist(); dialog.close(); render();
     notify(missing.length ? "还差"+missing.join("、")+"，可继续口述或点选。" : "评分已填齐，请核对后确认。");
   }
@@ -469,7 +494,7 @@
       showNote = false;
       const saved = persist();
       if (dialog.open) dialog.close();
-      if (done) navigate("records"); else render();
+      render();
       notify(record.code+" 已保存"+(done?"，本轮品鉴完成。":"，下一份是 "+r.current+"。")+
         extra+(saved?"":" 请及时导出。"));
     } catch (error) {
@@ -490,12 +515,15 @@
     main.setAttribute("aria-busy","true");
     notify("正在提交评分…");
     try {
-      await TasterCloud.submit(r.id,evaluator,r.current,scores);
+      const local = await TasterAudio.list({roundId:r.id,code:r.current,rater:r.rater}).catch(()=>[]);
+      const memory = entry.unsavedAudio.get(r.current) || [];
+      const warning = await TasterCloud.submit(r.id,evaluator,r.current,scores,[...local,...memory]);
       if (guest !== entry) return;
+      entry.unsavedAudio.delete(r.current);
       const {record,done} = M.confirmScore(r);
       persist();
       render();
-      notify(record.code+" 已提交"+(done?"，本场评分完成。":"，下一份是 "+r.current+"。")+extra);
+      notify(record.code+" 已提交"+(done?"，本场评分完成。":"，下一份是 "+r.current+"。")+(warning || extra));
     } catch (error) {
       if (guest === entry) {
         render();
@@ -556,18 +584,37 @@
   function exportOptions() {
     const r = round();
     if (!r.records.length) { openModal("导出 Excel",'<p class="help">当前场次还没有已确认的评分。完成一份样品并确认后，即可导出评价记录。</p><div class="group-actions"><button class="action" data-action="home">返回工作台</button></div>'); return; }
-    openModal("导出 Excel",'<p class="help">将「'+esc(r.title)+'」的 '+r.records.length+' 条已确认评价导出为 .xlsx 文件，保留各评价员的原始分数和备注。</p><label class="checkline"><input type="checkbox" id="export-names">包含样品真实名称（揭盲）</label><div class="group-actions"><button class="action" data-action="download">'+icon("download")+'下载 Excel</button></div>');
+    openModal("导出本机评分",'<p class="help">将「'+esc(r.title)+'」的 '+r.records.length+' 条已确认评价导出为 Excel，也可连同本机保存的录音一起打包。</p><label class="checkline"><input type="checkbox" id="export-names">包含样品真实名称（揭盲）</label><div class="group-actions"><button class="ghost" data-action="download">'+icon("download")+'只下载 Excel</button><button class="action" data-action="download-archive">下载 Excel 和录音 ZIP</button></div>');
   }
-  function download() {
+  async function download(button,includeAudio = false) {
     const r = round(), withNames = $("#export-names").checked;
+    if ($("#dialog-inner [aria-busy='true']")) return;
+    button.setAttribute("aria-busy","true");
     try {
-      const bytes = TasterExport.build({...r,samples:r.samples.map(s=>({...s,name:withNames?s.name:""}))});
-      const url = URL.createObjectURL(new Blob([bytes],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}));
+      const excel = TasterExport.build({...r,samples:r.samples.map(s=>({...s,name:withNames?s.name:""}))});
+      const title = r.title.replace(/[<>:"/\\|?*\u0000-\u001f]/g,"_");
+      let blob = new Blob([excel],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
+      if (includeAudio) {
+        const files = {"评分.xlsx":excel};
+        for (const [index,record] of r.records.entries()) {
+          if (!button.isConnected || !dialog.open) return;
+          const clips = await TasterAudio.list({roundId:r.id,code:record.code,rater:record.rater});
+          for (const [i,clip] of clips.entries()) {
+            const type = clip.blob.type;
+            const ext = type.includes("mp4") ? "m4a" : type.includes("ogg") ? "ogg" : type.includes("wav") ? "wav" : "webm";
+            files["录音/"+record.code+"_记录"+(index+1)+"_"+(i+1)+"."+ext] = new Uint8Array(await clip.blob.arrayBuffer());
+          }
+        }
+        blob = new Blob([TasterExport.writeZip(files)],{type:"application/zip"});
+      }
+      if (!button.isConnected || !dialog.open) return;
+      const url = URL.createObjectURL(blob);
       const a = document.createElement("a"); a.href = url;
-      a.download = r.title.replace(/[<>:"/\\|?*\u0000-\u001f]/g,"_")+"_"+(withNames?"揭盲":"盲评")+"_"+new Date().toISOString().slice(0,10)+".xlsx";
+      a.download = title+"_"+(withNames?"揭盲":"盲评")+"_"+new Date().toISOString().slice(0,10)+(includeAudio?".zip":".xlsx");
       document.body.append(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(url),60000);
-      dialog.close(); notify("已生成 Excel 文件。");
+      dialog.close(); notify(includeAudio?"已打包本机评分和可用录音。":"已生成 Excel 文件。");
     } catch (err) { notify("导出失败："+err.message); }
+    finally { button.removeAttribute("aria-busy"); }
   }
   document.addEventListener("click",event=>{
     const b = event.target.closest("button");
@@ -615,6 +662,8 @@
       case "catalog": openCatalog(); break;
       case "cloud": cloud.open(); break;
       case "organize": organizeRound(r); break;
+      case "local-records": navigate("records"); break;
+      case "shared-directory": navigate("sharing"); break;
       case "blank-template": templateEditor({ mode:"edit" }); break;
       case "round-template": templateEditor({ source:r, mode:"edit" }); break;
       case "import-template": templateEditor({ mode:"import" }); break;
@@ -629,7 +678,8 @@
       case "save-map":
         dialog.querySelectorAll("[data-mapping]").forEach(input=>r.samples[Number(input.dataset.mapping)].name=input.value.trim());
         persist(); dialog.close(); notify("对照表已更新。"); break;
-      case "download": download(); break;
+      case "download": download(b); break;
+      case "download-archive": download(b,true); break;
     }
   });
   document.addEventListener("submit",event=>{
@@ -686,7 +736,7 @@
         if (Array.isArray(saved.records)) r.records = saved.records;
         if (saved.drafts && typeof saved.drafts === "object") r.drafts = saved.drafts;
       }
-      guest = { round:r, storageKey, evaluator };
+      guest = { round:r, storageKey, evaluator, unsavedAudio:new Map() };
       page = "workspace";
       persist(); render();
     } catch (error) {
@@ -713,7 +763,7 @@
     }
     if(hash.startsWith("#template=") || /^#(data|request|decision)=/.test(hash)) {
       stopRecognition();
-      page="community";
+      page=hash.startsWith("#template=") ? "community" : "sharing";
       render();
       if(!hash.startsWith("#template=")) { sharing.fromHash(hash); return; }
       try { templateEditor({ initial:TasterTemplates.readLink(hash) }); }

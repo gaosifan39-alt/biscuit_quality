@@ -110,12 +110,13 @@
     let offset = 0;
     for (const [path, contents] of Object.entries(parts)) {
       const name = encoder.encode(path);
-      const data = encoder.encode(contents);
+      const data = typeof contents === "string" ? encoder.encode(contents) : contents;
       const checksum = crc32(data);
       const header = new Uint8Array(30 + name.length);
       const local = new DataView(header.buffer);
       local.setUint32(0, 0x04034b50, true);
       local.setUint16(4, 20, true);
+      local.setUint16(6, 0x0800, true); // UTF-8 member names.
       local.setUint16(12, 0x21, true); // Minimum valid DOS date, 1980-01-01.
       local.setUint32(14, checksum, true);
       local.setUint32(18, data.length, true);
@@ -129,6 +130,7 @@
       central.setUint32(0, 0x02014b50, true);
       central.setUint16(4, 20, true);
       central.setUint16(6, 20, true);
+      central.setUint16(8, 0x0800, true);
       central.setUint16(14, 0x21, true);
       central.setUint32(16, checksum, true);
       central.setUint32(20, data.length, true);
@@ -203,5 +205,5 @@
     });
   }
 
-  globalThis.TasterExport = Object.freeze({ build });
+  globalThis.TasterExport = Object.freeze({ build, writeZip });
 })();

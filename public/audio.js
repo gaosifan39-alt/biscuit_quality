@@ -43,7 +43,7 @@
     const release = () => stream.getTracks().forEach(track => track.stop());
     let recorder;
     try {
-      recorder = new MediaRecorder(stream);
+      recorder = new MediaRecorder(stream, { audioBitsPerSecond: 64_000 });
       recorder.start();
     } catch (error) {
       release();

@@ -132,7 +132,13 @@ th,td{text-align:left;border-top:1px solid var(--line);padding:12px 15px}
 th{background:#eff3e8;font-size:13px;font-weight:600}
 td .subtle{padding:3px}
 .setting-card{padding:24px;align-self:start}
-.settings-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+.settings-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:18px}
+.cloud-directory-list,.cloud-request{display:grid;gap:8px}
+.cloud-directory-list{margin-top:12px;max-height:36rem;overflow:auto}
+.cloud-request{border:1px solid var(--line);border-radius:12px;padding:14px;justify-items:start}
+.cloud-request + .cloud-request{margin-top:8px}
+.cloud-request p{margin:0;overflow-wrap:anywhere}
+[data-cloud][aria-busy=true]{cursor:progress}
 .setting-card .help{margin-top:8px}
 .summary-list{display:grid;grid-template-columns:auto 1fr;gap:10px 16px;font-size:14px}
 .summary-list dt{color:var(--muted)}

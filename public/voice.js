@@ -18,6 +18,8 @@
   // Explicitly reported readings can also be used for short, two-syllable names.
   const confirmedReadings = new Map([
     ['色泽', ['塞责', '塞責']],
+    ['筋道度', ['进高度', '進高度']],
+    ['顺滑度', ['胜华路', '勝華路']],
     ['粘牙度', [
       '年牙', '年牙度', '年牙程度',
       '绵羊', '绵羊度', '棉羊', '棉羊度', '绵牙', '绵牙度', '棉牙', '棉牙度',
