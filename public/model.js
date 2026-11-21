@@ -14,12 +14,25 @@
     ["色泽", "裂纹", "酥脆度", "粘牙度", "风味"],
     ["色泽", "香气", "酥脆度", "甜度", "粘牙度", "总体喜好"]
   ];
+  const sixItemEndpoints = [
+    ["表面颜色很浅", "表面颜色很深"],
+    ["几乎闻不到香气", "香气非常浓"],
+    ["咬下去绵软，几乎没有脆感", "咬下去干脆，有明显的脆裂感"],
+    ["几乎没有甜味", "甜味非常强"],
+    ["牙齿上几乎不粘饼屑", "饼屑明显黏在牙齿上"],
+    ["非常不喜欢", "非常喜欢"]
+  ];
   const codeAt = index => "B-" + String(index + 1).padStart(3, "0");
 
   function usesPreviousBiscuitTraits(round) {
-    if (round.template && !round.template.foodType?.includes("饼干")) return false;
-    return previousBiscuitTraits.some(list =>
+    if (round.customScale) return false;
+    const old = previousBiscuitTraits.find(list =>
       list.length === round.traits.length && list.every((name, i) => name === round.traits[i]));
+    if (!old || !round.template) return Boolean(old);
+    const { foodType, version, traits: rules } = round.template;
+    return old.length === sixItemEndpoints.length && foodType === "市售饼干" && version === "1.2"
+      && rules?.length === old.length && rules.every((rule, i) => rule.name === old[i]
+        && rule.min === 1 && rule.max === 10 && rule.low === sixItemEndpoints[i][0] && rule.high === sixItemEndpoints[i][1]);
   }
 
   function defaultTemplateFor(dimensions) {
@@ -42,7 +55,8 @@
 
   function makeRound({ title = "小麦饼干品质盲评", names = Array(20).fill(""), dimensions = traits, rater = "评价员 01", template, codedSamples } = {}) {
     let snapshot;
-    template ??= defaultTemplateFor(dimensions);
+    const builtIn = template == null ? defaultTemplateFor(dimensions) : undefined;
+    template ??= builtIn;
     if (template != null) {
       snapshot = JSON.parse(JSON.stringify(template));
       if (!Array.isArray(snapshot.traits) || !snapshot.traits.length) throw Error("模板至少需要一项评价性状。");
@@ -61,20 +75,32 @@
     return {
       id: crypto.randomUUID(), title, traits: snapshot ? snapshot.traits.map(rule => rule.name) : [...dimensions], rater,
       ...(snapshot ? { template: snapshot } : {}),
+      ...(!builtIn ? { customScale: true } : {}),
       samples, current: samples[0]?.code ?? codeAt(0), drafts: {}, records: [], created: new Date().toISOString()
     };
   }
 
-  function openSevenItemRound(state, source) {
-    if (!usesPreviousBiscuitTraits(source)) return;
+  function ensureScoringRound(state) {
+    const source = state.rounds.find(round => round.id === state.active);
+    if (!usesPreviousBiscuitTraits(source)) return source;
     let target = state.rounds.find(r => r.sevenItemSource === source.id);
     if (!target) {
       target = makeRound({ title: source.title + "（七项）", rater: source.rater, codedSamples: source.samples });
       target.current = source.current;
       target.sevenItemSource = source.id;
+      const completed = new Set(source.records.map(record => key(record.code, record.rater)));
+      const compatible = target.traits.filter(trait => source.traits.includes(trait) && (trait !== "色泽" || source.template));
+      for (const [id, prior] of Object.entries(source.drafts)) {
+        if (completed.has(id)) continue;
+        const scores = Object.fromEntries(compatible
+          .filter(trait => valid(prior.scores[trait], ruleFor(target, trait)))
+          .map(trait => [trait, prior.scores[trait]]));
+        if (Object.keys(scores).length || prior.note) target.drafts[id] = { scores, note: prior.note || "" };
+      }
       state.rounds.push(target);
     }
     state.active = target.id;
+    return target;
   }
 
   const key = (code, rater) => JSON.stringify([code, rater]);
@@ -110,5 +136,5 @@
     if (next) round.current = next.code;
     return { record, done: !next };
   }
-  globalThis.TasterModel = { traits, defaultTemplateFor, makeRound, usesPreviousBiscuitTraits, openSevenItemRound, findRecord, draft, ruleFor, valid, confirmScore };
+  globalThis.TasterModel = { traits, defaultTemplateFor, makeRound, usesPreviousBiscuitTraits, ensureScoringRound, findRecord, draft, ruleFor, valid, confirmScore };
 })();

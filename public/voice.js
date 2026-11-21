@@ -13,8 +13,7 @@
     ['风味', '風味'],
   ];
 
-  // These specific dictation errors were identified by tasters. Other
-  // near sounds are only suggested and need the taster to pick a column.
+  // Explicitly reported readings can also be used for short, two-syllable names.
   const confirmedReadings = new Map([
     ['色泽', ['塞责', '塞責']],
     ['粘牙度', [
@@ -23,8 +22,8 @@
     ]],
   ]);
   const sounds = ['色涩瑟设社射舍塞', '泽澤责責择则折哲', '酥苏素速舒书', '脆翠催崔萃',
-    '度杜渡肚', '香乡相湘想', '气氣器汽起', '甜田填天添', '粘黏沾年念碾',
-    '牙芽崖伢压壓', '总總宗纵棕中', '体體提', '喜洗禧', '好号號', '裂列烈', '纹文紋闻',
+    '度杜渡肚部步布', '香乡相湘想', '气氣器汽起', '甜田填天添', '粘黏沾年念碾',
+    '牙芽崖伢压壓呀', '总總宗纵棕中', '体體提', '喜洗禧', '好号號', '裂列烈', '纹文紋闻',
     '孔空恐控', '隙细細系係戏'];
   const soundSets = new Map(sounds.flatMap(group => [...group].map(c => [c, group])));
   const otherReadings = new Map([
@@ -128,23 +127,85 @@
     return { names, variants, confirmed, phonetic, pattern };
   }
 
-  function unclaimedScoreIssues(transcript, mentions) {
+  function soundKey(name) {
+    return [...name].map(c => soundSets.get(c)?.[0] || c).join('');
+  }
+
+  // Compare complete, explicitly scored names. A single missing, added,
+  // replaced or transposed syllable may suggest a field. Repetition of an
+  // adjacent syllable, as in “牙牙度”, provides stronger evidence.
+  function closeness(heard, name) {
+    if (heard === name) return 2;
+    if (Math.max(heard.length, name.length) < 3 || Math.abs(heard.length - name.length) > 1) return 0;
+    let i = 0;
+    while (i < heard.length && heard[i] === name[i]) i++;
+    if (heard.length === name.length) {
+      if (heard.slice(i + 1) === name.slice(i + 1)) {
+        const repeated = heard[i] === heard[i + 1] || heard[i] === heard[i - 1];
+        return repeated && name.length >= 3 ? 2 : 1;
+      }
+      const swapped = heard[i] === name[i + 1] && heard[i + 1] === name[i];
+      return swapped && heard.slice(i + 2) === name.slice(i + 2) ? 1 : 0;
+    }
+    const [longer, shorter] = heard.length > name.length ? [heard, name] : [name, heard];
+    if (longer.slice(i + 1) !== shorter.slice(i)) return 0;
+    return heard === longer && longer[i] === longer[i - 1] && shorter.length >= 2 ? 2 : 1;
+  }
+
+  function matchScoredPhrases(transcript, mentions, suggestions, names) {
     const issues = [];
+    const forms = [...names].filter(([name]) => /^[\u3400-\u9fff]{2,20}$/u.test(name))
+      .map(([name, trait]) => [soundKey(name), trait]);
     let previousEnd = 0;
     for (const score of transcript.matchAll(new RegExp(numberPattern + '\\s*分', 'gu'))) {
-      const prefix = transcript.slice(previousEnd, score.index).split(punctuation).pop();
-      const start = score.index - prefix.length;
+      const preceding = transcript.slice(previousEnd, score.index).replace(/[，,、:： \t]+$/u, '');
+      const prefix = preceding.split(punctuation).pop();
+      const start = previousEnd + preceding.length - prefix.length;
       previousEnd = score.index + score[0].length;
       // A score ends a spoken item even without a comma. Ignore number units
       // used in observations, such as “放凉三分钟” or “八分之一”.
       if (/^(?:钟|鐘|之|半|贝|貝)/u.test(transcript.slice(previousEnd))) continue;
-      if (mentions.some(m => m.index >= start && m.index < previousEnd)) continue;
-      const label = prefix.trim();
-      const phrase = label + score[0];
-      if (!/^[\u3400-\u9fff]{2,20}$/u.test(label) || scoreAtStart.test(phrase) || extraScore.test(phrase)) continue;
-      if (/^(?:满分|总分|扣分|加分|减分|上限|下限)/u.test(label)) continue;
-      issues.push('“' + phrase + '”未对应到本场性状，请修改这段文字后再填入。');
+      const phrase = prefix.trim() + score[0];
+      if (scoreAtStart.test(phrase) || extraScore.test(phrase)) continue;
+      if (/^(?:满分|总分|扣分|加分|减分|上限|下限)/u.test(phrase)) continue;
+      const heard = prefix.trim().replace(/(?:我给|我打|评分为|得分为|给|打|是)$/u, '').trimEnd();
+      const compact = heard.replace(/[ \t]/gu, '');
+      if (!/^[\u3400-\u9fff]{2,20}$/u.test(compact)) continue;
+      if (/[零〇一二两兩三四五六七八九十百千万负負分]/u.test(compact)) continue;
+      const index = start + prefix.indexOf(heard);
+      const end = index + heard.length;
+      const inside = mentions.filter(m => m.index >= start && m.index < previousEnd);
+      // A full name (including one preceded by conversational words) already
+      // has its score. A shorter prefix may belong to a stuttered longer name.
+      if (inside.some(m => m.end >= end) || inside.length > 1) continue;
+      const heardKey = soundKey(compact);
+      let best = 0;
+      const choices = new Set();
+      for (const [name, trait] of forms) {
+        const level = closeness(heardKey, name);
+        if (!level || level < best) continue;
+        if (level > best) { best = level; choices.clear(); }
+        choices.add(trait);
+      }
+      if (!choices.size) {
+        if (!inside.length) issues.push('“' + phrase + '”未对应到本场性状，请修改这段文字后再填入。');
+        continue;
+      }
+      if (inside.length) {
+        const [earlier] = inside;
+        mentions.splice(mentions.indexOf(earlier), 1);
+        const superseded = suggestions.findIndex(suggestion => suggestion.start === earlier.index && suggestion.end === earlier.end);
+        if (superseded !== -1) suggestions.splice(superseded, 1);
+      }
+      if (best === 2 && choices.size === 1) {
+        mentions.push({ index, end, trait: [...choices][0] });
+      } else {
+        mentions.push({ index, end });
+        suggestions.push({ heard, start: index, end, choices: [...choices] });
+      }
     }
+    mentions.sort((a, b) => a.index - b.index);
+    suggestions.sort((a, b) => a.start - b.start);
     return issues;
   }
 
@@ -169,7 +230,8 @@
         const choices = new Set(variants.get(spelling) || []);
         for (const form of phonetic) if (form.match.test(heard)) choices.add(form.trait);
         if (!choices.size) continue;
-        if (confirmed.has(spelling) && choices.size === 1) {
+        const fullSoundMatch = !variants.has(spelling) && spelling.length >= 3;
+        if ((confirmed.has(spelling) || fullSoundMatch) && choices.size === 1) {
           [trait] = choices;
         } else {
           suggestions.push({ heard, start: match.index, end, choices: [...choices] });
@@ -177,6 +239,7 @@
       }
       mentions.push({ index: match.index, end, trait });
     }
+    const issues = matchScoredPhrases(transcript, mentions, suggestions, names);
     const outcomes = new Map();
     for (const [index, mention] of mentions.entries()) {
       const { trait, end } = mention;
@@ -191,7 +254,6 @@
       }
     }
     const values = [];
-    const issues = unclaimedScoreIssues(transcript, mentions);
     for (const [trait, outcome] of outcomes) {
       if (outcome.issue) issues.push(`${trait}${outcome.issue}`);
       else values.push([trait, outcome.value]);

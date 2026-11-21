@@ -92,7 +92,9 @@
     document.querySelectorAll("nav button").forEach(b => {
       if (b.dataset.view === page) b.setAttribute("aria-current","page"); else b.removeAttribute("aria-current");
     });
-    const r = round();
+    const previousId = state.active;
+    const r = page === "workspace" ? M.ensureScoringRound(state) : round();
+    if (state.active !== previousId) persist();
     const isBiscuit = !r.template || r.template.foodType?.includes("饼干");
     const names = { workspace:isBiscuit ? "饼干盲评工作台" : "食品盲评工作台", records:"评价记录", settings:"场次设置" };
     const meta = '<div class="meta">'+icon("leaf")+esc(r.title)+'<span class="divider"></span>'+icon("user")+esc(r.rater)+'</div>';
@@ -125,30 +127,30 @@
       const rule = M.ruleFor(r,t);
       return t+(r.template ? Math.round((rule.min+rule.max)/2) : ["八","七","九"][i])+"分";
     }).join("，");
-    const oldScale = M.usesPreviousBiscuitTraits(r);
-    const sheetHelp = oldScale
-      ? "当前是"+r.traits.length+"项场次。七项场次沿用样品盲码，单独评分。原评分可在「场次设置」查看。"
-      : r.template?.instructions || "核对口述结果，也可点选分数。";
-    const switchScale = oldScale
-      ? '<button class="ghost" data-action="use-seven">切换到七项评分</button>'
-      : "";
+    const sheetHelp = r.template?.instructions || "核对口述结果，也可点选分数。";
     return '<section class="hero" aria-label="当前盲评样品与语音录入"><div class="sample"><span class="sample-tag">'+icon("sample")+'当前样品</span><div class="sample-bottom"><div><small>样品盲码</small><div class="sample-code">'+esc(r.current)+'</div></div><button class="switch" data-action="samples">'+icon("swap")+'切换样品</button></div></div>'+
       '<div class="voice"><div class="voice-head"><h2>'+icon("wave")+'语音评分</h2><button data-action="text">'+icon("keyboard")+'文字录入</button></div><div class="wave-area"><div class="wave" aria-hidden="true">'+wave+'</div><button data-action="mic" class="mic" aria-label="开始语音评分">'+icon("mic")+'</button><div class="wave right" aria-hidden="true">'+wave+'</div></div>'+
       '<p class="voice-instruction">点击麦克风，口述评分</p><p class="voice-example">试着说「'+esc(example)+'」</p></div></section>'+
-      '<section class="panel"><div class="sheet-heading"><div><h2 class="section-title">'+icon("clipboard")+'性状评分表</h2><p>'+esc(sheetHelp)+'</p>'+switchScale+'</div><span class="count-tag" id="score-count">已填 '+count+' / '+r.traits.length+'</span></div>'+
+      '<section class="panel"><div class="sheet-heading"><div><h2 class="section-title">'+icon("clipboard")+'性状评分表</h2><p>'+esc(sheetHelp)+'</p></div><span class="count-tag" id="score-count">已填 '+count+' / '+r.traits.length+'</span></div>'+
       '<div class="scale-label"><span>品质性状</span><span class="scale-range"><span>评分刻度</span><span>'+(r.template?"按各项量表":"1 低 · 10 高")+'</span></span><span>得分</span></div><div>'+rows+'</div>'+
       ((showNote||d.note)?'<div class="note-box"><label for="note">品鉴备注</label><textarea id="note" maxlength="2000" placeholder="记下这块饼干的口感或香气">'+esc(d.note)+'</textarea></div>':"")+
       '<div class="sheet-footer"><button class="subtle" data-action="note">'+icon("note")+'品鉴备注</button><button class="action" data-action="confirm">'+icon("check")+(M.findRecord(r)?"更新评价":"确认评分")+'</button></div></section>';
   }
   function recordsPage(r) {
+    const historical = M.usesPreviousBiscuitTraits(r);
     const closeout = '<section class="panel closeout"><div><h2>本场小结</h2><p class="help">已确认 '+r.records.length+' 条评价 · 原始记录保存在本机</p></div><button class="ghost" data-action="share-data">分享本场数据</button></section>';
     const header = '<div class="sheet-heading"><h2 class="section-title">'+icon("list")+'已确认的评价</h2><span class="count-tag">'+r.records.length+' 条记录</span></div>';
     if (!r.records.length) return '<section class="panel">'+header+'<div class="empty">'+icon("clipboard")+'<h3>还没有已确认的评价</h3><p>在工作台确认第一份样品评分后，即可在这里查看和导出。</p><button class="action" data-action="home">去评价</button></div></section>'+closeout;
-    const rows = r.records.map((x,i) => '<tr><td><b>'+esc(x.code)+'</b></td><td>'+esc(x.rater)+'</td>'+r.traits.map(t=>'<td>'+esc(x.scores[t])+'</td>').join("")+'<td>'+esc(x.note || "—")+'</td><td><button class="subtle" data-edit="'+i+'">'+icon("note")+'修改</button></td></tr>').reverse().join("");
-    return '<section class="panel">'+header+'<div class="table-wrap"><table><thead><tr>'+["盲码","评价员",...r.traits,"备注","操作"].map(t=>'<th>'+esc(t)+'</th>').join("")+'</tr></thead><tbody>'+rows+'</tbody></table></div></section>'+closeout;
+    const columns = ["盲码","评价员",...r.traits,"备注"];
+    if (!historical) columns.push("操作");
+    const rows = r.records.map((x,i) => {
+      const edit = historical ? "" : '<td><button class="subtle" data-edit="'+i+'">'+icon("note")+'修改</button></td>';
+      return '<tr><td><b>'+esc(x.code)+'</b></td><td>'+esc(x.rater)+'</td>'+r.traits.map(t=>'<td>'+esc(x.scores[t])+'</td>').join("")+'<td>'+esc(x.note || "—")+'</td>'+edit+'</tr>';
+    }).reverse().join("");
+    return '<section class="panel">'+header+'<div class="table-wrap"><table><thead><tr>'+columns.map(t=>'<th>'+esc(t)+'</th>').join("")+'</tr></thead><tbody>'+rows+'</tbody></table></div></section>'+closeout;
   }
   function settingsPage(r) {
-    const options = state.rounds.map((s,i)=>'<option value="'+esc(s.id)+'" '+(s===r?"selected":"")+'>'+esc(s.title)+' · 场次 '+(i+1)+'</option>').join("");
+    const options = state.rounds.map((s,i)=>'<option value="'+esc(s.id)+'" '+(s===r?"selected":"")+'>'+esc(s.title)+' · 场次 '+(i+1)+(M.usesPreviousBiscuitTraits(s)?" · 历史记录":"")+'</option>').join("");
     return '<div class="settings-grid"><section class="panel setting-card"><h2 class="card-title">本机场次</h2><label class="field">选择场次<select id="round-select">'+options+'</select></label><dl class="summary-list"><dt>盲评样品</dt><dd>'+r.samples.length+' 份</dd><dt>评价性状</dt><dd>'+r.traits.map(esc).join("、")+'</dd><dt>已确认评价</dt><dd>'+r.records.length+' 条</dd></dl><div class="settings-actions"><button class="action" data-action="new-round">'+icon("plus")+'新建场次</button><button class="ghost" data-action="templates">使用共享模板</button><button class="ghost" data-action="mapping">'+icon("eye")+'组织者对照表</button></div></section>'+
       '<section class="panel setting-card"><h2 class="card-title">当前评价员</h2><p class="help">同一设备可以轮流试吃。换人时输入不同的姓名或代号，各自的评价会单独记录。</p><form id="rater-form"><label class="field">姓名或代号<input name="rater" value="'+esc(r.rater)+'" maxlength="40" required></label><button class="ghost">保存评价员</button></form></section></div>';
   }
@@ -336,19 +338,6 @@
     if (b.id==="export") { exportOptions(); return; }
     switch (b.dataset.action) {
       case "home": navigate("workspace"); break;
-      case "use-seven": {
-        const priorLength = state.rounds.length;
-        M.openSevenItemRound(state,r);
-        if (!persist()) {
-          state.active = r.id;
-          state.rounds.length = priorLength;
-          return;
-        }
-        showNote = false;
-        render();
-        notify("已切换到七项评分。");
-        break;
-      }
       case "samples": openSamples(); break;
       case "text": voiceEditor(); break;
       case "mic": voiceEditor(true); break;
