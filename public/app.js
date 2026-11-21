@@ -30,7 +30,9 @@
   document.querySelectorAll("[data-icon]").forEach(el => el.outerHTML = icon(el.dataset.icon));
   const traitsInfo = {
     "色泽":["sun","烘焙色泽满意度",0], "裂纹":["crack","表面裂纹明显程度",1], "酥脆度":["crisp","咬碎时的松脆程度",2],
-    "粘牙度":["drop","咀嚼后的粘牙程度",3], "风味":["aroma","香气与滋味满意度",4]
+    "粘牙度":["drop","咀嚼后的粘牙程度",3], "风味":["aroma","香气与滋味满意度",4],
+    "香气":["aroma","闻起来的香气浓淡",4], "甜度":["drop","入口后的甜味强弱",1],
+    "孔隙度":["eye","掰开饼干，看断面上孔洞所占的面积",0], "总体喜好":["user","你有多喜欢这款饼干",2]
   };
   const storeKey = "little-taster.workspace.v1";
   const blank = () => { const first = M.makeRound(); return { active: first.id, rounds: [first] }; };
@@ -91,7 +93,8 @@
       if (b.dataset.view === page) b.setAttribute("aria-current","page"); else b.removeAttribute("aria-current");
     });
     const r = round();
-    const names = { workspace:r.template ? "食品盲评工作台" : "饼干盲评工作台", records:"评价记录", settings:"场次设置" };
+    const isBiscuit = !r.template || r.template.foodType?.includes("饼干");
+    const names = { workspace:isBiscuit ? "饼干盲评工作台" : "食品盲评工作台", records:"评价记录", settings:"场次设置" };
     const meta = '<div class="meta">'+icon("leaf")+esc(r.title)+'<span class="divider"></span>'+icon("user")+esc(r.rater)+'</div>';
     const savedCount = r.records.filter(x => x.rater === r.rater).length;
     const progress = '<div class="progress"><div><span>我的品鉴进度</span><span><b>'+savedCount+'</b> / '+r.samples.length+'</span></div><div class="track"><span style="width:'+100*savedCount/r.samples.length+'%"></span></div></div>';
@@ -109,7 +112,7 @@
     const rows = r.traits.map((t,i) => {
       const [symbol, desc, tone] = traitsInfo[t] || ["leaf","按场次约定评分",i%5];
       const rule = M.ruleFor(r,t), width = rule.max - rule.min + 1;
-      const description = r.template ? esc(rule.min+" 分 · "+rule.low+" / "+rule.max+" 分 · "+rule.high) : desc;
+      const description = rule.low && rule.high ? esc(rule.min+" 分 · "+rule.low+" / "+rule.max+" 分 · "+rule.high) : desc;
       const controls = width>10 ? '<input type="number" step="1" min="'+rule.min+'" max="'+rule.max+'" data-range-trait="'+i+'" aria-label="'+esc(t)+'分数" placeholder="'+rule.min+' 至 '+rule.max+'" value="'+(d.scores[t] ?? "")+'">' :
         Array.from({length:width},(_,n) => {
           const score = n+rule.min;
@@ -122,10 +125,17 @@
       const rule = M.ruleFor(r,t);
       return t+(r.template ? Math.round((rule.min+rule.max)/2) : ["八","七","九"][i])+"分";
     }).join("，");
+    const oldScale = M.usesPreviousBiscuitTraits(r);
+    const sheetHelp = oldScale
+      ? "当前是"+r.traits.length+"项场次。七项场次沿用样品盲码，单独评分。原评分可在「场次设置」查看。"
+      : r.template?.instructions || "核对口述结果，也可点选分数。";
+    const switchScale = oldScale
+      ? '<button class="ghost" data-action="use-seven">切换到七项评分</button>'
+      : "";
     return '<section class="hero" aria-label="当前盲评样品与语音录入"><div class="sample"><span class="sample-tag">'+icon("sample")+'当前样品</span><div class="sample-bottom"><div><small>样品盲码</small><div class="sample-code">'+esc(r.current)+'</div></div><button class="switch" data-action="samples">'+icon("swap")+'切换样品</button></div></div>'+
       '<div class="voice"><div class="voice-head"><h2>'+icon("wave")+'语音评分</h2><button data-action="text">'+icon("keyboard")+'文字录入</button></div><div class="wave-area"><div class="wave" aria-hidden="true">'+wave+'</div><button data-action="mic" class="mic" aria-label="开始语音评分">'+icon("mic")+'</button><div class="wave right" aria-hidden="true">'+wave+'</div></div>'+
       '<p class="voice-instruction">点击麦克风，口述评分</p><p class="voice-example">试着说「'+esc(example)+'」</p></div></section>'+
-      '<section class="panel"><div class="sheet-heading"><div><h2 class="section-title">'+icon("clipboard")+'性状评分表</h2><p>'+esc(r.template ? r.template.instructions || "请按各项量表评分。" : "核对口述结果，也可点选分数。分数越高，表示程度或满意度越高。")+'</p></div><span class="count-tag" id="score-count">已填 '+count+' / '+r.traits.length+'</span></div>'+
+      '<section class="panel"><div class="sheet-heading"><div><h2 class="section-title">'+icon("clipboard")+'性状评分表</h2><p>'+esc(sheetHelp)+'</p>'+switchScale+'</div><span class="count-tag" id="score-count">已填 '+count+' / '+r.traits.length+'</span></div>'+
       '<div class="scale-label"><span>品质性状</span><span class="scale-range"><span>评分刻度</span><span>'+(r.template?"按各项量表":"1 低 · 10 高")+'</span></span><span>得分</span></div><div>'+rows+'</div>'+
       ((showNote||d.note)?'<div class="note-box"><label for="note">品鉴备注</label><textarea id="note" maxlength="2000" placeholder="记下这块饼干的口感或香气">'+esc(d.note)+'</textarea></div>':"")+
       '<div class="sheet-footer"><button class="subtle" data-action="note">'+icon("note")+'品鉴备注</button><button class="action" data-action="confirm">'+icon("check")+(M.findRecord(r)?"更新评价":"确认评分")+'</button></div></section>';
@@ -167,6 +177,7 @@
   }
   function startRecording() {
     if (recognition) { recognition.stop(); return; }
+    $("#voice-choices")?.remove();
     const field = $("#speech-text");
     const feedback = $("#speech-feedback");
     const prior = field.value.trim();
@@ -203,6 +214,33 @@
       feedback.textContent = "麦克风启动失败。请检查麦克风权限，也可以手动输入文字。";
     }
   }
+  function askAboutWord(field, suggestion) {
+    const {heard,start,end,choices} = suggestion;
+    // The parser indexes the NFKC-normalized transcript. Keep the editable
+    // source intact until the taster actually selects a column.
+    const source = field.value.normalize("NFKC").trim();
+    const group = document.createElement("div");
+    group.id = "voice-choices";
+    group.className = "settings-actions";
+    group.setAttribute("role","group");
+    group.setAttribute("aria-label","确认口述性状");
+    for (const trait of choices) {
+      const b = document.createElement("button");
+      b.type = "button"; b.className = "ghost"; b.dataset.voiceChoice = trait;
+      b.textContent = "按「"+trait+"」填写";
+      b.addEventListener("click",()=>{
+        if (recognition || source !== field.value.normalize("NFKC").trim()) { group.remove(); return; }
+        field.value = source.slice(0,start)+trait+source.slice(end);
+        M.draft(round()).transcript = field.value;
+        persist();
+        applyTranscript();
+      });
+      group.append(b);
+    }
+    const feedback = $("#speech-feedback");
+    feedback.textContent = "听到的是「"+heard+"」。请选择你指的性状，或直接修改上面的文字。";
+    feedback.after(group);
+  }
   function applyTranscript() {
     if (recognition) {
       applyAfterRecording = true;
@@ -211,7 +249,12 @@
       return;
     }
     const r = round(), text = $("#speech-text").value.trim();
+    $("#voice-choices")?.remove();
     const parsed = TasterVoice.parse(text,r.traits,r.template?.traits);
+    if (parsed.suggestions?.length) {
+      askAboutWord($("#speech-text"),parsed.suggestions[0]);
+      return;
+    }
     if (parsed.issues.length || !Object.keys(parsed.scores).length) {
       $("#speech-feedback").textContent = parsed.issues.join("\n") || "请说出或输入性状名称和分数。";
       return;
@@ -293,6 +336,19 @@
     if (b.id==="export") { exportOptions(); return; }
     switch (b.dataset.action) {
       case "home": navigate("workspace"); break;
+      case "use-seven": {
+        const priorLength = state.rounds.length;
+        M.openSevenItemRound(state,r);
+        if (!persist()) {
+          state.active = r.id;
+          state.rounds.length = priorLength;
+          return;
+        }
+        showNote = false;
+        render();
+        notify("已切换到七项评分。");
+        break;
+      }
       case "samples": openSamples(); break;
       case "text": voiceEditor(); break;
       case "mic": voiceEditor(true); break;
@@ -344,7 +400,7 @@
       persist();
     }
     if(event.target.id==="note") { M.draft(round()).note=event.target.value; persist(); }
-    if(event.target.id==="speech-text"){ M.draft(round()).transcript=event.target.value; persist(); }
+    if(event.target.id==="speech-text"){ $("#voice-choices")?.remove(); $("#speech-feedback").textContent=""; M.draft(round()).transcript=event.target.value; persist(); }
   });
   document.addEventListener("change",event=>{
     if(event.target.id==="round-select") { state.active=event.target.value; showNote=false; persist(); render(); }

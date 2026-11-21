@@ -1,10 +1,48 @@
 (() => {
   "use strict";
-  const traits = ["色泽", "裂纹", "酥脆度", "粘牙度", "风味"];
+  const biscuitRules = [
+    ["色泽", "表面颜色很浅", "表面颜色很深", "观察饼干正面，按颜色深浅评分。"],
+    ["香气", "几乎闻不到香气", "香气非常浓", "拿近鼻子闻一下，按香气浓淡评分。"],
+    ["酥脆度", "咬下去绵软", "咬下去有明显的脆裂感", "留意第一口咬断时是否干脆。"],
+    ["甜度", "几乎没有甜味", "甜味非常强", "嚼几下，按甜味强弱评分。"],
+    ["粘牙度", "牙齿上几乎不粘饼屑", "饼屑明显黏在牙齿上", "咽下后、喝水前，感受粘牙程度。"],
+    ["孔隙度", "断面几乎看不到孔洞", "孔洞占断面的面积很大", "掰开饼干，观察孔洞占整个断面的面积。"],
+    ["总体喜好", "非常不喜欢", "非常喜欢", "尝完后，按你有多喜欢这款饼干评分。"]
+  ];
+  const traits = biscuitRules.map(([name]) => name);
+  const previousBiscuitTraits = [
+    ["色泽", "裂纹", "酥脆度", "粘牙度", "风味"],
+    ["色泽", "香气", "酥脆度", "甜度", "粘牙度", "总体喜好"]
+  ];
   const codeAt = index => "B-" + String(index + 1).padStart(3, "0");
 
-  function makeRound({ title = "小麦饼干品质盲评", names = Array(20).fill(""), dimensions = traits, rater = "评价员 01", template } = {}) {
+  function usesPreviousBiscuitTraits(round) {
+    if (round.template && !round.template.foodType?.includes("饼干")) return false;
+    return previousBiscuitTraits.some(list =>
+      list.length === round.traits.length && list.every((name, i) => name === round.traits[i]));
+  }
+
+  function defaultTemplateFor(dimensions) {
+    if (dimensions.length !== traits.length || !traits.every((name, i) => name === dimensions[i])) return;
+    return {
+      foodType: "小麦饼干", version: "1.3", contributor: "",
+      instructions: "前六项按感受到的程度评分，最后一项评总体喜好。每项报名称和 1–10 的整数分数。",
+      traits: biscuitRules.map(([name, low, high, instructions]) => ({ name, min: 1, max: 10, low, high, instructions }))
+    };
+  }
+
+  function assignBlindCodes(names) {
+    const shuffled = [...names];
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+    return shuffled.map((name, i) => ({ name, code: codeAt(i) }));
+  }
+
+  function makeRound({ title = "小麦饼干品质盲评", names = Array(20).fill(""), dimensions = traits, rater = "评价员 01", template, codedSamples } = {}) {
     let snapshot;
+    template ??= defaultTemplateFor(dimensions);
     if (template != null) {
       snapshot = JSON.parse(JSON.stringify(template));
       if (!Array.isArray(snapshot.traits) || !snapshot.traits.length) throw Error("模板至少需要一项评价性状。");
@@ -19,17 +57,24 @@
         }
       }
     }
-    const shuffled = [...names];
-    for (let i = shuffled.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-    }
+    const samples = codedSamples ? codedSamples.map(({ code, name }) => ({ code, name })) : assignBlindCodes(names);
     return {
       id: crypto.randomUUID(), title, traits: snapshot ? snapshot.traits.map(rule => rule.name) : [...dimensions], rater,
       ...(snapshot ? { template: snapshot } : {}),
-      samples: shuffled.map((name, i) => ({ name, code: codeAt(i) })),
-      current: codeAt(0), drafts: {}, records: [], created: new Date().toISOString()
+      samples, current: samples[0]?.code ?? codeAt(0), drafts: {}, records: [], created: new Date().toISOString()
     };
+  }
+
+  function openSevenItemRound(state, source) {
+    if (!usesPreviousBiscuitTraits(source)) return;
+    let target = state.rounds.find(r => r.sevenItemSource === source.id);
+    if (!target) {
+      target = makeRound({ title: source.title + "（七项）", rater: source.rater, codedSamples: source.samples });
+      target.current = source.current;
+      target.sevenItemSource = source.id;
+      state.rounds.push(target);
+    }
+    state.active = target.id;
   }
 
   const key = (code, rater) => JSON.stringify([code, rater]);
@@ -65,5 +110,5 @@
     if (next) round.current = next.code;
     return { record, done: !next };
   }
-  globalThis.TasterModel = { traits, makeRound, findRecord, draft, ruleFor, valid, confirmScore };
+  globalThis.TasterModel = { traits, defaultTemplateFor, makeRound, usesPreviousBiscuitTraits, openSevenItemRound, findRecord, draft, ruleFor, valid, confirmScore };
 })();

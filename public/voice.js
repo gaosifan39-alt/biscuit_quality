@@ -2,12 +2,34 @@
   'use strict';
 
   const traitNames = [
-    ['色泽', '颜色', '色澤'],
+    ['色泽', '颜色', '色澤', '色泽深浅', '颜色深浅'],
+    ['香气', '香氣', '香味', '香气强度', '香味浓度'],
     ['裂纹', '裂纹度', '裂紋'],
-    ['酥脆度', '酥脆', '松脆度'],
-    ['粘牙度', '黏牙度', '粘牙', '黏牙', '沾牙度'],
+    ['酥脆度', '酥脆', '松脆度', '脆度'],
+    ['甜度', '甜味', '甜味强度'],
+    ['粘牙度', '黏牙度', '粘牙', '黏牙', '沾牙度', '粘牙程度', '黏牙程度'],
+    ['孔隙度', '孔隙', '空隙度', '空隙', '气孔', '气孔多少'],
+    ['总体喜好', '总体喜好度', '整体喜好', '整体喜好度', '总体喜欢程度', '整体喜欢程度'],
     ['风味', '風味'],
   ];
+
+  // These specific dictation errors were identified by tasters. Other
+  // near sounds are only suggested and need the taster to pick a column.
+  const confirmedReadings = new Map([
+    ['色泽', ['塞责', '塞責']],
+    ['粘牙度', [
+      '年牙', '年牙度', '年牙程度',
+      '绵羊', '绵羊度', '棉羊', '棉羊度', '绵牙', '绵牙度', '棉牙', '棉牙度',
+    ]],
+  ]);
+  const sounds = ['色涩瑟设社射舍塞', '泽澤责責择则折哲', '酥苏素速舒书', '脆翠催崔萃',
+    '度杜渡肚', '香乡相湘想', '气氣器汽起', '甜田填天添', '粘黏沾年念碾',
+    '牙芽崖伢压壓', '总總宗纵棕中', '体體提', '喜洗禧', '好号號', '裂列烈', '纹文紋闻',
+    '孔空恐控', '隙细細系係戏'];
+  const soundSets = new Map(sounds.flatMap(group => [...group].map(c => [c, group])));
+  const otherReadings = new Map([
+    ['色泽', ['设置', '四则', '色则度']], ['总体喜好', ['总体型号', '总体信号']],
+  ]);
 
   const digits = '零一二三四五六七八九';
   const numberPattern = '[负負−+\\-]?\\s*[0-9零〇一二两兩三四五六七八九十百千万]+(?:[.点點][0-9零〇一二两兩三四五六七八九十]+)?';
@@ -71,24 +93,95 @@
     return value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
   }
 
+  function traitDictionary(labels) {
+    const names = new Map(labels);
+    const variants = new Map();
+    const confirmed = new Set();
+    for (const group of traitNames) {
+      const owners = group.filter(alias => labels.has(alias)).map(alias => labels.get(alias));
+      if (!owners.length) continue;
+      for (const alias of group) {
+        if (names.has(alias)) continue;
+        if (owners.length === 1) names.set(alias, owners[0]);
+        else variants.set(alias, owners);
+      }
+      for (const reading of otherReadings.get(group[0]) || []) variants.set(reading, owners);
+      for (const reading of confirmedReadings.get(group[0]) || []) {
+        variants.set(reading, owners);
+        confirmed.add(reading);
+      }
+    }
+    const forms = [];
+    for (const [name, trait] of names) {
+      forms.push({ length: name.length, pattern: escapeRegex(name) });
+      if (!/^[\u3400-\u9fff]{2,20}$/u.test(name) || ![...name].some(c => soundSets.has(c))) continue;
+      const pattern = [...name].map(c => soundSets.has(c) ? '[' + soundSets.get(c) + ']' : c).join('[ \\t]*');
+      forms.push({ length: name.length, pattern, match: new RegExp('^(?:' + pattern + ')$', 'u'), trait });
+    }
+    for (const reading of variants.keys()) {
+      const pattern = [...reading].map(escapeRegex).join('[ \\t]*');
+      forms.push({ length: reading.length, pattern });
+    }
+    forms.sort((a, b) => b.length - a.length);
+    const pattern = [...new Set(forms.map(form => form.pattern))].join('|');
+    const phonetic = forms.filter(form => form.match);
+    return { names, variants, confirmed, phonetic, pattern };
+  }
+
+  function unclaimedScoreIssues(transcript, mentions) {
+    const issues = [];
+    let previousEnd = 0;
+    for (const score of transcript.matchAll(new RegExp(numberPattern + '\\s*分', 'gu'))) {
+      const prefix = transcript.slice(previousEnd, score.index).split(punctuation).pop();
+      const start = score.index - prefix.length;
+      previousEnd = score.index + score[0].length;
+      // A score ends a spoken item even without a comma. Ignore number units
+      // used in observations, such as “放凉三分钟” or “八分之一”.
+      if (/^(?:钟|鐘|之|半|贝|貝)/u.test(transcript.slice(previousEnd))) continue;
+      if (mentions.some(m => m.index >= start && m.index < previousEnd)) continue;
+      const label = prefix.trim();
+      const phrase = label + score[0];
+      if (!/^[\u3400-\u9fff]{2,20}$/u.test(label) || scoreAtStart.test(phrase) || extraScore.test(phrase)) continue;
+      if (/^(?:满分|总分|扣分|加分|减分|上限|下限)/u.test(label)) continue;
+      issues.push('“' + phrase + '”未对应到本场性状，请修改这段文字后再填入。');
+    }
+    return issues;
+  }
+
   function parse(text, traits, rules = []) {
     const transcript = normalize(text || '');
     const ranges = new Map(rules.map(rule => [rule.name, rule]));
     const labels = new Map(traits.filter(trait => typeof trait === 'string' && trait.trim())
       .map(trait => [normalize(trait), trait]));
-    const names = new Map(labels);
-    for (const group of traitNames) {
-      const owners = group.filter(label => labels.has(label));
-      if (owners.length !== 1) continue;
-      for (const alias of group) names.set(alias, labels.get(owners[0]));
+    const { names, variants, confirmed, phonetic, pattern } = traitDictionary(labels);
+    const suggestions = [];
+    const mentions = [];
+    for (const match of pattern ? transcript.matchAll(new RegExp(pattern, 'gu')) : []) {
+      const heard = match[0];
+      const end = match.index + heard.length;
+      let trait = names.get(heard);
+      if (trait === undefined) {
+        // Only offer a near match in a scoring context ("设置八分"), never
+        // rewrite ordinary conversation ("打开设置，再评香气八分").
+        const rest = transcript.slice(end).trimStart().replace(/^[，,、:：]\s*/u, '');
+        if (!scoreAtStart.test(rest.split(punctuation, 1)[0])) continue;
+        const spelling = heard.replace(/[ \t]/gu, '');
+        const choices = new Set(variants.get(spelling) || []);
+        for (const form of phonetic) if (form.match.test(heard)) choices.add(form.trait);
+        if (!choices.size) continue;
+        if (confirmed.has(spelling) && choices.size === 1) {
+          [trait] = choices;
+        } else {
+          suggestions.push({ heard, start: match.index, end, choices: [...choices] });
+        }
+      }
+      mentions.push({ index: match.index, end, trait });
     }
-    const sorted = [...names.keys()].sort((left, right) => right.length - left.length);
-    const pattern = sorted.map(escapeRegex).join('|');
-    const mentions = pattern ? [...transcript.matchAll(new RegExp(pattern, 'gu'))] : [];
     const outcomes = new Map();
     for (const [index, mention] of mentions.entries()) {
-      const trait = names.get(mention[0]);
-      const fragment = transcript.slice(mention.index + mention[0].length, mentions[index + 1]?.index);
+      const { trait, end } = mention;
+      if (trait === undefined) continue;
+      const fragment = transcript.slice(end, mentions[index + 1]?.index);
       const current = getScore(fragment, ranges.get(trait));
       const earlier = outcomes.get(trait);
       if (earlier && (earlier.issue || current.issue || earlier.value !== current.value)) {
@@ -98,13 +191,15 @@
       }
     }
     const values = [];
-    const issues = [];
+    const issues = unclaimedScoreIssues(transcript, mentions);
     for (const [trait, outcome] of outcomes) {
       if (outcome.issue) issues.push(`${trait}${outcome.issue}`);
       else values.push([trait, outcome.value]);
     }
-    if (!mentions.length) issues.push('请按“性状名称 + 分数”口述，例如“色泽八分”。');
-    return { scores: Object.fromEntries(values), issues };
+    if (!mentions.length && !issues.length) issues.push('请按“性状名称 + 分数”口述，例如“'+(traits[0] || '色泽')+'给几分”。');
+    const result = { scores: Object.fromEntries(values), issues };
+    if (suggestions.length) result.suggestions = suggestions;
+    return result;
   }
 
   const errorMessages = {

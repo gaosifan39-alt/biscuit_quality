@@ -55,6 +55,12 @@
 
   function fromRound(round) {
     if (round.template) return validate(round.template);
+    // A new-round form passes only its list of names. Saved rounds retain
+    // their original rules, including the older satisfaction-based color scale.
+    if (!round.id) {
+      const preset = globalThis.TasterModel?.defaultTemplateFor(round.traits);
+      if (preset) return validate(preset);
+    }
     return validate({
       foodType:"小麦饼干", instructions:"", contributor:"", version:"1.0",
       traits:round.traits.map(name => {
