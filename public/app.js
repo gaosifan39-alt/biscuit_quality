@@ -7,6 +7,7 @@
     grid:'<rect x="3" y="3" width="7" height="7" rx="1.4"/><rect x="14" y="3" width="7" height="7" rx="1.4"/><rect x="3" y="14" width="7" height="7" rx="1.4"/><rect x="14" y="14" width="7" height="7" rx="1.4"/>',
     list:'<rect x="4" y="3" width="16" height="18" rx="3"/><path d="M8 8h8M8 12h8M8 16h5"/>',
     sliders:'<path d="M3 7h5m5 0h8M3 17h10m5 0h3"/><circle cx="10.5" cy="7" r="2.5"/><circle cx="15.5" cy="17" r="2.5"/>',
+    share:'<path d="m8 11 8-5M8 13l8 5"/><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="5" r="2.5"/><circle cx="18" cy="19" r="2.5"/>',
     download:'<path d="M12 3v11m-4-4 4 4 4-4M4 15v4a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-4"/>',
     leaf:'<path d="M4 20c1-7 8-9 14-15M5 16C1 7 12 3 21 3c-1 10-6 17-16 13Z"/>',
     user:'<circle cx="12" cy="8" r="3.4"/><path d="M5 20c0-7 14-7 14 0"/>',
@@ -46,6 +47,7 @@
     storageError = "本机存储暂时无法读取。可在当前页面评价并导出 Excel，关闭前请先导出。";
   }
   const round = () => state.rounds.find(r => r.id === state.active);
+  const sharedTemplates = TasterTemplates.presets();
   let page = "workspace", showNote = false, toastTimer, voiceSession = null;
   let lastFocused = null;
   const audioURLs = [];
@@ -85,7 +87,7 @@
     }
     session.capture?.finish();
   }
-  const knownPages = ["workspace","records","settings"];
+  const knownPages = ["workspace","records","community"];
   function navigate(next) {
     if (!knownPages.includes(next)) next = "workspace";
     stopRecognition();
@@ -102,14 +104,13 @@
     const previousId = state.active;
     const r = page === "workspace" ? M.ensureScoringRound(state) : round();
     if (state.active !== previousId) persist();
-    const isBiscuit = !r.template || r.template.foodType?.includes("饼干");
-    const names = { workspace:isBiscuit ? "饼干盲评工作台" : "食品盲评工作台", records:"评价记录", settings:"场次设置" };
+    const names = { workspace:"品鉴工作台", records:"评价记录", community:"模板与共享" };
     const meta = '<div class="meta">'+icon("leaf")+esc(r.title)+'<span class="divider"></span>'+icon("user")+esc(r.rater)+'</div>';
     const savedCount = r.records.filter(x => x.rater === r.rater).length;
     const progress = '<div class="progress"><div><span>我的品鉴进度</span><span><b>'+savedCount+'</b> / '+r.samples.length+'</span></div><div class="track"><span style="width:'+100*savedCount/r.samples.length+'%"></span></div></div>';
     $("#main").innerHTML = (storageError ? '<p id="storage-warning" class="inline-status" role="alert">'+esc(storageError)+'</p>' : "")+
-      '<div class="page-heading"><div><h1>'+names[page]+'</h1>'+meta+'</div>'+(page === "workspace" ? progress : "")+'</div>'+
-      (page === "workspace" ? workspace(r) : page === "records" ? recordsPage(r) : settingsPage(r));
+      '<div class="page-heading"><div><h1>'+names[page]+'</h1>'+(page === "community" ? "" : meta)+'</div>'+(page === "workspace" ? progress : "")+'</div>'+
+      (page === "workspace" ? workspace(r) : page === "records" ? recordsPage(r) : communityPage(r));
   }
   function makeWave() {
     const heights = [3,5,3,8,11,7,13,18,10,8,17,25,14,22,31,18,13,27,40,24,18,35,46,30,19,28,42,34,23,15];
@@ -135,7 +136,11 @@
       return t+(r.template ? Math.round((rule.min+rule.max)/2) : ["八","七","九"][i])+"分";
     }).join("，");
     const sheetHelp = r.template?.instructions || "核对口述结果，也可点选分数。";
-    return '<section class="hero" aria-label="当前盲评样品与语音录入"><div class="sample"><span class="sample-tag">'+icon("sample")+'当前样品</span><div class="sample-bottom"><div><small>样品盲码</small><div class="sample-code">'+esc(r.current)+'</div></div><button class="switch" data-action="samples">'+icon("swap")+'切换样品</button></div></div>'+
+    const food = r.template?.foodType || "小麦饼干";
+    const sampleClass = food.includes("饼干") ? "sample" : "sample sample-generic";
+    return '<section class="panel tasting-bar" aria-label="评鉴对象"><div class="tasting-selection"><span class="trait-icon tone3">'+icon("sample")+'</span><div><p>当前评鉴</p><h2>'+esc(food)+'</h2></div></div>'+
+      '<div class="panel-actions"><button class="action" data-action="catalog">'+icon("grid")+'选食品与模板</button><button class="ghost" data-action="organize">'+icon("sliders")+'管理场次</button></div></section>'+
+      '<section class="hero" aria-label="当前盲评样品与语音录入"><div class="'+sampleClass+'"><span class="sample-tag">'+icon("sample")+'当前样品</span><div class="sample-bottom"><div><small>样品盲码</small><div class="sample-code">'+esc(r.current)+'</div></div><button class="switch" data-action="samples">'+icon("swap")+'切换样品</button></div></div>'+
       '<div class="voice"><div class="voice-head"><h2>'+icon("wave")+'语音评分</h2><button data-action="text">'+icon("keyboard")+'文字录入</button></div><div class="wave-area"><div class="wave" aria-hidden="true">'+wave+'</div><button data-action="mic" class="mic" aria-label="开始语音评分">'+icon("mic")+'</button><div class="wave right" aria-hidden="true">'+wave+'</div></div>'+
       '<p class="voice-instruction">点麦克风口述，停顿后自动填分</p><p class="voice-example">试着说「'+esc(example)+'」</p></div></section>'+
       '<section class="panel"><div class="sheet-heading"><div><h2 class="section-title">'+icon("clipboard")+'性状评分表</h2><p>'+esc(sheetHelp)+'</p></div><span class="count-tag" id="score-count">已填 '+count+' / '+r.traits.length+'</span></div>'+
@@ -147,9 +152,8 @@
   }
   function recordsPage(r) {
     const historical = M.usesPreviousBiscuitTraits(r);
-    const closeout = '<section class="panel closeout"><div><h2>本场小结</h2><p class="help">已确认 '+r.records.length+' 条评价 · 原始记录保存在本机</p></div><button class="ghost" data-action="share-data">分享本场数据</button></section>';
-    const header = '<div class="sheet-heading"><h2 class="section-title">'+icon("list")+'已确认的评价</h2><span class="count-tag">'+r.records.length+' 条记录</span></div>';
-    if (!r.records.length) return '<section class="panel">'+header+'<div class="empty">'+icon("clipboard")+'<h3>还没有已确认的评价</h3><p>在工作台确认第一份样品评分后，即可在这里查看和导出。</p><button class="action" data-action="home">去评价</button></div></section>'+closeout;
+    const header = '<div class="sheet-heading"><h2 class="section-title">'+icon("list")+'已确认的评价</h2><span class="count-tag">'+r.records.length+' 条记录</span></div>'+roundPicker(r,"records-select");
+    if (!r.records.length) return '<section class="panel">'+header+'<div class="empty">'+icon("clipboard")+'<h3>还没有已确认的评价</h3><p>录入第一份样品评分后，即可在这里查看和导出。</p><button class="action" data-action="home">去评价</button></div></section>';
     const columns = ["盲码","评价员",...r.traits,"备注"];
     const hasOperations = !historical || r.records.some(record => record.hasAudio);
     if (hasOperations) columns.push("操作");
@@ -159,12 +163,38 @@
       return '<tr><td><b>'+esc(x.code)+'</b></td><td>'+esc(x.rater)+'</td>'+r.traits.map(t=>'<td>'+esc(x.scores[t])+'</td>').join("")+'<td>'+esc(x.note || "—")+'</td>'+
         (hasOperations?'<td>'+audio+edit+'</td>':"")+'</tr>';
     }).reverse().join("");
-    return '<section class="panel">'+header+'<div class="table-wrap"><table><thead><tr>'+columns.map(t=>'<th>'+esc(t)+'</th>').join("")+'</tr></thead><tbody>'+rows+'</tbody></table></div></section>'+closeout;
+    return '<section class="panel">'+header+'<div class="table-wrap"><table><thead><tr>'+columns.map(t=>'<th>'+esc(t)+'</th>').join("")+'</tr></thead><tbody>'+rows+'</tbody></table></div></section>';
   }
-  function settingsPage(r) {
+  function roundPicker(r, id) {
     const options = state.rounds.map((s,i)=>'<option value="'+esc(s.id)+'" '+(s===r?"selected":"")+'>'+esc(s.title)+' · 场次 '+(i+1)+(M.usesPreviousBiscuitTraits(s)?" · 历史记录":"")+'</option>').join("");
-    return '<div class="settings-grid"><section class="panel setting-card"><h2 class="card-title">本机场次</h2><label class="field">选择场次<select id="round-select">'+options+'</select></label><dl class="summary-list"><dt>盲评样品</dt><dd>'+r.samples.length+' 份</dd><dt>评价性状</dt><dd>'+r.traits.map(esc).join("、")+'</dd><dt>已确认评价</dt><dd>'+r.records.length+' 条</dd></dl><div class="settings-actions"><button class="action" data-action="new-round">'+icon("plus")+'新建场次</button><button class="ghost" data-action="templates">使用共享模板</button><button class="ghost" data-action="mapping">'+icon("eye")+'组织者对照表</button></div></section>'+
-      '<section class="panel setting-card"><h2 class="card-title">当前评价员</h2><p class="help">同一设备可以轮流试吃。换人时输入不同的姓名或代号，各自的评价会单独记录。</p><form id="rater-form"><label class="field">姓名或代号<input name="rater" value="'+esc(r.rater)+'" maxlength="40" required></label><button class="ghost">保存评价员</button></form></section></div>';
+    return '<label class="field session-picker">选择场次<select id="'+id+'" data-round-picker>'+options+'</select></label>';
+  }
+  function organizeRound(r) {
+    openModal("管理场次",roundPicker(r,"round-select")+
+      '<form id="rater-form"><label class="field">更换评价员<input name="rater" value="'+esc(r.rater)+'" maxlength="40" required></label><div class="panel-actions"><button class="ghost">保存评价员</button><button type="button" class="ghost" data-action="mapping">'+icon("eye")+'盲码对照表</button></div></form>');
+  }
+  function localTemplates() {
+    return state.savedTemplates || [];
+  }
+  function templateCards(templates, offset = 0) {
+    return templates.map((template,index) => '<button class="template-card" data-template="'+(offset+index)+'"><strong>'+esc(template.foodType)+'</strong>'+
+      '<span>'+template.traits.map(t=>esc(t.name)).join(" · ")+'</span><small>'+template.traits.length+' 项 · v'+esc(template.version)+'</small></button>').join("");
+  }
+  function catalogPage() {
+    const saved = localTemplates();
+    return '<h3 class="template-category">示例模板</h3><div class="template-list">'+templateCards(sharedTemplates)+'</div>'+
+      (saved.length ? '<h3 class="template-category">本机模板</h3><div class="template-list">'+templateCards(saved,sharedTemplates.length)+'</div>' : "");
+  }
+  function communityPage(r) {
+    return '<div class="settings-grid"><section class="panel setting-card"><h2 class="card-title">数据共享</h2><p class="help">分享评分汇总或数据说明卡，也可接收他人发来的共享文件。</p>'+roundPicker(r,"share-round-select")+
+      '<p class="help">'+r.records.length+' 条评价 · 原始数据保存在本机</p><div class="panel-actions"><button class="action" data-action="share-data">'+icon("share")+'分享本场数据</button>'+
+      '<button class="ghost" data-action="import-data">接收共享文件</button></div></section>'+
+      '<section class="panel setting-card"><h2 class="card-title">评价模板</h2>'+
+      '<div class="panel-actions"><button class="action" data-action="blank-template">'+icon("plus")+'新建模板</button><button class="ghost" data-action="import-template">上传或导入模板</button><button class="ghost" data-action="round-template">使用本场规则</button></div>'+
+      catalogPage()+'</section></div>';
+  }
+  function openCatalog() {
+    openModal("选择食品与模板",catalogPage()+'<div class="group-actions"><button class="ghost" data-action="import-template">导入模板</button><button class="action" data-action="blank-template">'+icon("plus")+'新建模板</button></div>');
   }
   function openModal(title, content, focusSelector) {
     clearAudioURLs();
@@ -415,44 +445,54 @@
       notify(error.message);
     }
   }
-  function templateEditor(initial, formDraft = {}) {
-    const seed = formDraft.traits?.trim()
-      ? { traits:formDraft.traits.split(/[、,，]/).map(s=>s.trim()).filter(Boolean) }
-      : round();
+  function saveLocalTemplate(template) {
+    const key = JSON.stringify(template);
+    if ([...sharedTemplates,...localTemplates()].some(existing => JSON.stringify(existing) === key)) return "模板库已有这一份模板。";
+    const saved = (state.savedTemplates ??= []);
+    saved.push(template);
+    if (!persist()) {
+      saved.pop();
+      throw Error("本机保存失败，请下载模板文件保留。");
+    }
+    render();
+    return "已保存到本机模板，可从品鉴工作台选择。";
+  }
+  function templateEditor({ initial, mode, source, formDraft = {} } = {}) {
     try {
       TasterTemplates.open({
-        round:seed, openModal, initial,
+        round:source, openModal, initial, mode, onSave:saveLocalTemplate,
         onUse:template=>newRoundForm(TasterTemplates.validate(template),formDraft)
       });
     } catch(e) { notify(e.message); }
   }
   function newRoundForm(template, formDraft = {}) {
-    const ruleField = template
-      ? '<div class="share-purpose"><strong>'+esc(template.foodType)+' · '+esc(template.version)+'</strong><p>'+template.traits.map(rule=>esc(rule.name)+' '+rule.min+'–'+rule.max).join('、')+'</p></div>'
-      : '<label class="field">评价性状<input name="traits" required maxlength="250" value="'+esc(formDraft.traits ?? M.traits.join("、"))+'"><small>用顿号或逗号分隔，最多 12 项，每项按 1–10 分评价。</small></label>';
-    openModal("新建盲评场次",'<form id="new-form"><button type="button" class="ghost" data-action="templates">'+(template?'修改模板副本':'使用共享模板')+'</button><label class="field">场次名称<input name="title" value="'+esc(formDraft.title ?? (template ? template.foodType+'盲评' : ''))+'" placeholder="例如：冬小麦饼干第一轮" maxlength="60" required></label><label class="field">品种名称<textarea name="names" rows="4" required maxlength="10000" placeholder="每行一个品种">'+esc(formDraft.names || '')+'</textarea><small>输入 1–200 个品种。创建后会随机分配盲码，请按对照表为实物贴签。</small></label>'+ruleField+'<p id="form-feedback" class="issues" role="status"></p><div class="group-actions"><button class="action">创建场次</button></div></form>',"input");
+    const ruleField = '<div class="share-purpose"><strong>'+esc(template.foodType)+' · '+esc(template.version)+'</strong><p>'+
+      template.traits.map(rule=>esc(rule.name)+' '+rule.min+'–'+rule.max).join('、')+'</p></div>';
+    openModal("新建品鉴场次",'<form id="new-form">'+ruleField+
+      '<label class="field">场次名称<input name="title" value="'+esc(formDraft.title ?? (template.foodType+'品鉴').slice(0,60))+'" maxlength="60" required></label>'+
+      '<label class="field">样品名称<textarea name="names" rows="4" required maxlength="10000" placeholder="每行填写一个样品">'+esc(formDraft.names || '')+'</textarea><small>可填写 1–200 个样品。创建后会随机分配盲码。</small></label>'+
+      '<p id="form-feedback" class="issues" role="status"></p><div class="group-actions"><button type="button" class="ghost" data-action="edit-form-template">修改模板副本</button><button class="action">创建场次</button></div></form>',"input");
     $("#new-form").tastingTemplate = template;
   }
   function createRound(form) {
     const data = new FormData(form), title = data.get("title").trim();
     const names = data.get("names").split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
     const template = form.tastingTemplate;
-    const dimensions = template ? template.traits.map(rule=>rule.name) : data.get("traits").split(/[、,，]/).map(s=>s.trim()).filter(Boolean);
-    if (!title || !names.length || names.length>200 || names.some(x=>x.length>80) || !dimensions.length || dimensions.length>12 || dimensions.some(s=>s.length>20 || s in Object.prototype) || new Set(dimensions).size!==dimensions.length) {
-      $("#form-feedback").textContent = "请填写场次名称、1–200 行品种（每行最多 80 字），以及 1–12 个不同性状（每项最多 20 字）。"; return;
+    if (!title || !names.length || names.length>200 || names.some(x=>x.length>80)) {
+      $("#form-feedback").textContent = "请填写场次名称和 1–200 行样品名称，每行最多 80 字。"; return;
     }
-    const r = M.makeRound({ title, names, dimensions, template, rater:template ? "评价员 01" : round().rater });
+    const r = M.makeRound({ title, names, template, rater:round().rater });
     state.rounds.push(r); state.active = r.id;
-    persist(); dialog.close(); navigate("settings"); notify("新场次已创建，可查看盲码对照表为实物贴签。");
+    persist(); navigate("workspace"); notify("场次已创建。可到「管理场次」查看盲码对照表。");
   }
   function showMapping() {
     const r = round();
-    openModal("组织者盲码对照表",'<p class="help">请按此表为实体样品贴签，完成后关闭对照表再交给评价员。</p><div class="table-wrap"><table><thead><tr><th>样品盲码</th><th>小麦品种</th></tr></thead><tbody>'+r.samples.map((s,i)=>'<tr><td>'+esc(s.code)+'</td><td><input aria-label="'+esc(s.code)+' 对应品种" data-mapping="'+i+'" maxlength="80" value="'+esc(s.name)+'" placeholder="填写实际品种"></td></tr>').join("")+'</tbody></table></div><div class="group-actions"><button class="action" data-action="save-map">保存对照表</button></div>');
+    openModal("组织者盲码对照表",'<p class="help">请按此表为实体样品贴签，完成后关闭对照表再交给评价员。</p><div class="table-wrap"><table><thead><tr><th>样品盲码</th><th>样品名称</th></tr></thead><tbody>'+r.samples.map((s,i)=>'<tr><td>'+esc(s.code)+'</td><td><input aria-label="'+esc(s.code)+' 对应样品" data-mapping="'+i+'" maxlength="80" value="'+esc(s.name)+'" placeholder="填写样品名称"></td></tr>').join("")+'</tbody></table></div><div class="group-actions"><button class="action" data-action="save-map">保存对照表</button></div>');
   }
   function exportOptions() {
     const r = round();
     if (!r.records.length) { openModal("导出 Excel",'<p class="help">当前场次还没有已确认的评分。完成一份样品并确认后，即可导出评价记录。</p><div class="group-actions"><button class="action" data-action="home">返回工作台</button></div>'); return; }
-    openModal("导出 Excel",'<p class="help">将「'+esc(r.title)+'」的 '+r.records.length+' 条已确认评价导出为 .xlsx 文件，保留各评价员的原始分数和备注。</p><label class="checkline"><input type="checkbox" id="export-names">包含真实品种名称（揭盲）</label><div class="group-actions"><button class="action" data-action="download">'+icon("download")+'下载 Excel</button></div>');
+    openModal("导出 Excel",'<p class="help">将「'+esc(r.title)+'」的 '+r.records.length+' 条已确认评价导出为 .xlsx 文件，保留各评价员的原始分数和备注。</p><label class="checkline"><input type="checkbox" id="export-names">包含样品真实名称（揭盲）</label><div class="group-actions"><button class="action" data-action="download">'+icon("download")+'下载 Excel</button></div>');
   }
   function download() {
     const r = round(), withNames = $("#export-names").checked;
@@ -469,6 +509,11 @@
     const b = event.target.closest("button");
     if (!b) return;
     if (b.dataset.view) { navigate(b.dataset.view); return; }
+    if ("template" in b.dataset) {
+      const template = [...sharedTemplates,...localTemplates()][Number(b.dataset.template)];
+      if (template) templateEditor({ initial:template });
+      return;
+    }
     const r = round();
     if ("trait" in b.dataset) {
       const t = r.traits[Number(b.dataset.trait)];
@@ -503,10 +548,15 @@
         saveCurrentScore(r);
         break;
       }
-      case "new-round": newRoundForm(); break;
-      case "templates": {
+      case "catalog": openCatalog(); break;
+      case "organize": organizeRound(r); break;
+      case "blank-template": templateEditor({ mode:"edit" }); break;
+      case "round-template": templateEditor({ source:r, mode:"edit" }); break;
+      case "import-template": templateEditor({ mode:"import" }); break;
+      case "import-data": sharing.openFile(); break;
+      case "edit-form-template": {
         const form = $("#new-form");
-        templateEditor(form?.tastingTemplate, form ? Object.fromEntries(new FormData(form)) : {});
+        templateEditor({ initial:form.tastingTemplate, mode:"edit", formDraft:Object.fromEntries(new FormData(form)) });
         break;
       }
       case "share-data": sharing.ownerRound(r); break;
@@ -524,7 +574,7 @@
       const name=new FormData(event.target).get("rater").trim();
       if(!name){notify("请输入评价员姓名或代号。"); return;}
       const r=round(); r.rater=name; r.current=r.samples.find(s=>!M.findRecord(r,s.code))?.code || r.samples[0].code;
-      persist(); render(); notify("已切换至"+name+"。");
+      persist(); dialog.close(); render(); notify("已切换至"+name+"。");
     }
   });
   document.addEventListener("input",event=>{
@@ -541,20 +591,24 @@
     if(event.target.id==="speech-text"){ $("#voice-choices")?.remove(); $("#speech-feedback").textContent=""; M.draft(round()).transcript=event.target.value; persist(); }
   });
   document.addEventListener("change",event=>{
-    if(event.target.id==="round-select") { state.active=event.target.value; showNote=false; persist(); render(); }
+    if (event.target.hasAttribute("data-round-picker")) {
+      state.active=event.target.value; showNote=false; persist();
+      if (dialog.open) dialog.close();
+      if (page === "workspace" && M.usesPreviousBiscuitTraits(round())) navigate("records"); else render();
+    }
   });
   function route() {
     const hash=location.hash;
     if(hash.startsWith("#template=") || /^#(data|request|decision)=/.test(hash)) {
       stopRecognition();
-      page=hash.startsWith("#template=") ? "settings" : "records";
+      page="community";
       render();
-      if(page==="records") { sharing.fromHash(hash); return; }
-      try { templateEditor(TasterTemplates.readLink(hash)); }
+      if(!hash.startsWith("#template=")) { sharing.fromHash(hash); return; }
+      try { templateEditor({ initial:TasterTemplates.readLink(hash) }); }
       catch(e) { openModal("模板无法打开",'<p class="issues">'+esc(e.message)+'</p>'); }
       return;
     }
-    const next=knownPages.includes(hash.slice(1)) ? hash.slice(1) : "workspace";
+    const next = hash === "#settings" ? "community" : knownPages.includes(hash.slice(1)) ? hash.slice(1) : "workspace";
     if(next!==page || dialog.open) navigate(next); else render();
   }
   window.addEventListener("hashchange",route);

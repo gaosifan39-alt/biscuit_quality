@@ -159,7 +159,8 @@
   function build({ title = "", traits, samples, records, rater = "", template }) {
     const names = new Map(samples.map(sample => [sample.code, sample.name]));
     const rules = new Map((template?.traits || []).map(rule => [rule.name, rule]));
-    const headers = ["盲码", "品种名称", "评价人", ...traits, "品鉴备注", "记录时间（北京时间）", "品鉴批次"];
+    const sampleName = template?.foodType && !template.foodType.includes("饼干") ? "样品名称" : "品种名称";
+    const headers = ["盲码", sampleName, "评价人", ...traits, "品鉴备注", "记录时间（北京时间）", "品鉴批次"];
     const widths = [14, 25, 18, ...traits.map(trait => Math.min(65, Math.max(13, trait.length * 2 + 5))), 44, 27, 30];
     const rows = records.map(record => [
       textCell(record.code), textCell(names.get(record.code)), textCell(record.rater ?? rater),
@@ -170,7 +171,7 @@
       entries.map(([id, type, target]) => `<Relationship Id="${id}" Type="${relNS}/${type}" Target="${target}"/>`).join("") + "</Relationships>";
     const sheets = [
       ["评分明细", worksheet(headers, widths, rows)],
-      ["盲码对照", worksheet(["盲码", "品种名称"], [14, 30], samples.map(sample => [textCell(sample.code), textCell(sample.name)]))]
+      ["盲码对照", worksheet(["盲码", sampleName], [14, 30], samples.map(sample => [textCell(sample.code), textCell(sample.name)]))]
     ];
     if (template) {
       const scaleRows = template.traits.map(rule => [

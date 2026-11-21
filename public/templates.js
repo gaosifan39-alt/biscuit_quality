@@ -70,6 +70,23 @@
     });
   }
 
+  function presets() {
+    const biscuit = globalThis.TasterModel.defaultTemplateFor(globalThis.TasterModel.traits);
+    const noodle = {
+      foodType: "刀削面", version: "1.0", contributor: "小小品鉴家",
+      instructions: "各样品尽量用相同的煮制时间和试吃温度。每项按 1–10 分评，最后一项记录总体喜好。",
+      traits: [
+        ["色泽", "面片颜色很浅", "面片颜色很深", "在相同光线下观察刚煮好的面片。"],
+        ["香气", "几乎闻不到香气", "香气非常浓", "盛出后先闻香气。"],
+        ["筋道度", "面片松软易断", "咬起来有明显弹性", "感受咬下去后的韧性和回弹。"],
+        ["顺滑度", "入口明显粗涩", "入口非常顺滑", "感受面片在口中的滑润程度。"],
+        ["粘牙度", "几乎不粘牙", "明显粘牙", "咀嚼后感受面片黏附牙齿的程度。"],
+        ["总体喜好", "非常不喜欢", "非常喜欢", "按个人喜好评分。"]
+      ].map(([name, low, high, instructions]) => ({ name, min: 1, max: 10, low, high, instructions }))
+    };
+    return [validate({...biscuit, contributor: "小小品鉴家"}), validate(noodle)];
+  }
+
   function parseJSON(text) {
     let input;
     try { input = JSON.parse(text); }
@@ -133,8 +150,11 @@
       '<button type="button" class="tt-remove" data-tt="remove">移除此项</button></div></details>';
   }
 
-  function open({round, openModal, onUse, initial}) {
-    let design = initial ? validate(initial) : fromRound(round);
+  function open({round, openModal, onUse, onSave, initial, mode}) {
+    let design = initial ? validate(initial) : round ? fromRound(round) : {
+      foodType: "", instructions: "", contributor: "", version: "1.0",
+      traits: [{name:"",min:1,max:10,low:"",high:"",instructions:""}]
+    };
     let panel;
 
     function show(title, html) {
@@ -221,12 +241,13 @@
           (t.instructions?'<p>'+escape(t.instructions)+'</p>':'')+'</dd></div>').join('')+'</dl>'+
         '<p class="help">发布时，以上食品类别、署名、版本和评价规则会写入分享链接与文件。接收方可修改副本并自行开场。</p>'+
         '<div class="tt-actions">'+button("edit","修改模板副本")+button("use","使用模板新建场次","action")+'</div>'+
-        '<div class="tt-share">'+button("publish","发布空模板")+'</div>'+feedback;
+        '<div class="tt-share">'+(onSave ? button("save","保存到本机模板") : "")+button("publish","生成模板分享链接")+'</div>'+feedback;
       show("模板预览", content).addEventListener("click", event => {
         const action = event.target.closest("[data-tt]")?.dataset.tt;
         try {
           if (action==="edit") return edit();
           if (action==="use") return onUse(validate(design));
+          if (action==="save") return report(onSave(validate(design)));
           if (action==="publish") published();
         } catch (error) { report(error.message); }
       });
@@ -234,12 +255,12 @@
     function published() {
       const url = shareLink(design, location.href);
       const title = escape(design.foodType) + " · " + escape(design.version);
-      const large = url.length > 2048 ? "链接较长，建议下载 JSON 文件发送。" : "接收方可打开链接，或在「导入其他模板」中选择文件。";
+      const large = url.length > 2048 ? "链接较长，可以下载 JSON 文件发送。" : "接收方可打开链接，或在「模板与共享」导入文件。";
       const content = '<div class="tt-identity"><h3>'+title+'</h3><p>'+design.traits.length+' 项评价性状</p></div>'+
         '<label class="tt-field">分享链接<textarea rows="2" readonly data-copy-link>'+escape(url)+'</textarea></label>'+
         '<p class="help">'+large+'</p><div class="tt-actions">'+button("copy","复制分享链接","action")+button("file","下载模板 JSON")+'</div>'+
         '<div class="tt-share">'+button("back","查看模板预览")+button("use","使用模板新建场次")+'</div>'+feedback;
-      show("空模板已发布",content).addEventListener("click", async event => {
+      show("模板分享",content).addEventListener("click", async event => {
         const action = event.target.closest("[data-tt]")?.dataset.tt;
         try {
           if (action==="back") return preview();
@@ -269,9 +290,12 @@
         } catch (error) { report(error.message); }
       });
     }
-    if (initial) preview(); else edit();
+    if (mode === "import") importer();
+    else if (mode === "edit") edit();
+    else if (initial) preview();
+    else edit();
   }
 
-  globalThis.TasterTemplates = {validate, fromRound, readLink, shareLink, fromURL, open};
+  globalThis.TasterTemplates = {validate, fromRound, presets, readLink, shareLink, fromURL, open};
 })();
 

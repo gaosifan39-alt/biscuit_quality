@@ -19,7 +19,7 @@
   const wrapped = rows => '<div class="table-wrap share-table"><table>'+rows+'</table></div>';
   const cells = (tag,list) => "<tr>"+list.map(v=>"<"+tag+">"+esc(v)+"</"+tag+">").join("")+"</tr>";
   const label = (card, field) => S.fieldLabel(card,field);
-  const extras = {variety:"真实品种名称",location:"田间位置",note:"品鉴备注（可能包含原话）",quote:"个人原话"};
+  const extras = {variety:"样品真实名称",location:"田间位置",note:"品鉴备注（可能包含原话）",quote:"个人原话"};
   const hasText = value => typeof value==="string" && !!value.trim();
   const counts = c => esc(c.foodType || "食品")+" · "+c.sampleCount+" 份样品 · "+c.recordCount+" 条评价";
   const tags = list => '<div class="share-tags">'+list.map(v=>'<span>'+esc(v)+'</span>').join("")+'</div>';
@@ -72,7 +72,7 @@
     function handoff(kind,obj,title,description) {
       const url=shareUrl(kind,obj);
       const long=url.length>8000;
-      screen(title,help(description)+(long?help("此内容较长，请发送共享文件。接收者在网站「评价记录 → 分享本场数据」打开文件。"):
+      screen(title,help(description)+(long?help("此内容较长，请发送共享文件。接收者在「模板与共享 → 接收共享文件」打开。"):
         '<label class="field">分享链接<textarea readonly rows="2">'+esc(url)+'</textarea></label>')+
         actions(...(long?[]:[button("copy","复制链接",true)]),button("file","下载共享文件",long)),{
         copy:async el=>{
@@ -227,7 +227,10 @@
       try { const {kind,value}=S.decode(hash); await receive(kind,value); }
       catch(e) { showError(e); }
     }
-    return {ownerRound,fromHash};
+    function openFile() {
+      screen("接收共享文件", help("打开他人发给你的数据分享卡、申请或审批回执。")+fileInput);
+    }
+    return {ownerRound,fromHash,openFile};
   }
   globalThis.TasterShareUI={create};
 })();
