@@ -121,12 +121,16 @@
       { name: trait, min: 1, max: 10, low: "", high: "", instructions: "" };
   }
   const valid = (value, rule = { min: 1, max: 10 }) => Number.isInteger(value) && value >= rule.min && value <= rule.max;
-  function confirmScore(round) {
+  function checkedDraft(round) {
     const entry = draft(round);
     for (const trait of round.traits) {
       const rule = ruleFor(round, trait);
       if (!valid(entry.scores[trait], rule)) throw Error(`请为“${trait}”填写 ${rule.min} 到 ${rule.max} 之间的整数评分。`);
     }
+    return entry;
+  }
+  function confirmScore(round) {
+    const entry = checkedDraft(round);
     const found = findRecord(round);
     const record = { code: round.current, rater: round.rater, scores: { ...entry.scores }, note: entry.note.trim(),
       ...(entry.hasAudio ? { hasAudio: true } : {}), at: new Date().toISOString() };
@@ -138,5 +142,5 @@
     if (next) round.current = next.code;
     return { record, done: !next };
   }
-  globalThis.TasterModel = { traits, defaultTemplateFor, makeRound, usesPreviousBiscuitTraits, ensureScoringRound, findRecord, draft, ruleFor, valid, confirmScore };
+  globalThis.TasterModel = { traits, defaultTemplateFor, makeRound, usesPreviousBiscuitTraits, ensureScoringRound, findRecord, draft, ruleFor, valid, checkedDraft, confirmScore };
 })();

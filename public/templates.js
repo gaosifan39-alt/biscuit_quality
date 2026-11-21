@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const limits = {foodType:60, instructions:500, contributor:60, version:24, name:20, low:100, high:100};
+  const limits = {foodType:60, instructions:500, contributor:60, version:24, name:20, low:100, high:100, keywords:160};
   const maxFileSize = 65536;
   const maxHashSize = 180000;
   const biscuitEnds = {
@@ -44,11 +44,13 @@
         instructions:clean(trait.instructions, "instructions", "“" + name + "”的评价说明", false)
       };
     });
+    const keywords = clean(input.keywords, "keywords", "搜索关键词", false);
     return {
       foodType:clean(input.foodType, "foodType", "食品类别"),
       instructions:clean(input.instructions, "instructions", "评价总说明", false),
       contributor:clean(input.contributor, "contributor", "贡献者", false),
       version:clean(input.version, "version", "版本"),
+      ...(keywords ? {keywords} : {}),
       traits
     };
   }
@@ -73,7 +75,7 @@
   function presets() {
     const biscuit = globalThis.TasterModel.defaultTemplateFor(globalThis.TasterModel.traits);
     const noodle = {
-      foodType: "刀削面", version: "1.0", contributor: "小小品鉴家",
+      foodType: "刀削面", version: "1.0", contributor: "小小品鉴家", keywords:"刀削面品质、面条、面制品、小麦品质",
       instructions: "各样品尽量用相同的煮制时间和试吃温度。每项按 1–10 分评，最后一项记录总体喜好。",
       traits: [
         ["色泽", "面片颜色很浅", "面片颜色很深", "在相同光线下观察刚煮好的面片。"],
@@ -84,7 +86,87 @@
         ["总体喜好", "非常不喜欢", "非常喜欢", "按个人喜好评分。"]
       ].map(([name, low, high, instructions]) => ({ name, min: 1, max: 10, low, high, instructions }))
     };
-    return [validate({...biscuit, contributor: "小小品鉴家"}), validate(noodle)];
+    return [validate({...biscuit, contributor:"小小品鉴家", keywords:"小麦品质、小麦饼干、饼干品质、烘焙"}), validate(noodle)];
+  }
+
+  function matches(template, query) {
+    const words = query.normalize("NFKC").toLowerCase().trim().split(/[\s,，、]+/u).filter(Boolean);
+    const content = [template.foodType,template.keywords,template.contributor,template.instructions,...template.traits.map(trait=>trait.name)]
+      .join("\n").normalize("NFKC").toLowerCase();
+    return words.every(word => content.includes(word));
+  }
+
+  const columns = ["食品类别","模板版本","贡献者","搜索关键词","评价总说明","性状名称","最低分","最高分","最低分含义","最高分含义","评价说明"];
+
+  function exampleCSV() {
+    const sample = presets()[0];
+    const quote = cell => '"'+String(cell).replaceAll('"','""')+'"';
+    const rows = sample.traits.map((trait,i) => [
+      ...(i===0 ? [sample.foodType,sample.version,"",sample.keywords,sample.instructions] : ["","","","",""]),
+      trait.name,trait.min,trait.max,trait.low,trait.high,trait.instructions
+    ]);
+    return "\uFEFF"+[columns,...rows].map(row=>row.map(quote).join(",")).join("\r\n")+"\r\n";
+  }
+
+  function csvRows(content) {
+    const rows = [];
+    let row = [], cell = "", quoted = false, afterQuote = false;
+    const finishCell = () => { row.push(cell); cell = ""; afterQuote = false; };
+    const finishRow = () => {
+      finishCell();
+      if (row.some(value => value.trim())) rows.push(row);
+      row = [];
+    };
+    const input = content.replace(/^\uFEFF/u,"");
+    for (let index=0; index<input.length; index++) {
+      const char = input[index];
+      if (quoted) {
+        if (char !== '"') cell += char;
+        else if (input[index+1] === '"') { cell += '"'; index++; }
+        else { quoted = false; afterQuote = true; }
+      } else if (char === ",") {
+        finishCell();
+      } else if (char === "\n" || char === "\r") {
+        finishRow();
+        if (char === "\r" && input[index+1] === "\n") index++;
+      } else if (char === '"' && !cell && !afterQuote) {
+        quoted = true;
+      } else if (afterQuote || char === '"') {
+        problem("CSV 有一处引号格式不正确，请用 Excel 另存为 CSV UTF-8 后重试。");
+      } else {
+        cell += char;
+      }
+    }
+    if (quoted) problem("CSV 有一处引号没有闭合，请用 Excel 重新保存文件。");
+    finishRow();
+    return rows;
+  }
+
+  function parseCSV(content) {
+    const [head = [],...rows] = csvRows(content);
+    if (head.length !== columns.length || !columns.every((name,i)=>head[i].trim()===name))
+      problem("CSV 列名与示例表不一致。请在下载的示例表上修改，保留第一行列名。");
+    if (!rows.length) problem("请在示例表中至少填写一项性状。");
+    const [foodType,version,contributor,keywords,instructions] = rows[0];
+    const asScore = value => /^[+-]?\d+$/u.test(value.trim()) ? Number(value) : NaN;
+    return validate({
+      foodType,version,contributor,keywords,instructions,
+      traits:rows.map((row,index)=>{
+        if (row.length !== columns.length) problem("第 "+(index+2)+" 行的列数与示例表不一致。");
+        const [name,min,max,low,high,notes] = row.slice(5);
+        return {name,min:asScore(min),max:asScore(max),low,high,instructions:notes};
+      })
+    });
+  }
+
+  async function readTemplateFile(file) {
+    if (file.size > maxFileSize) problem("文件超过 64 KB，请选用示例表格或模板 JSON。");
+    if (!/\.csv$/iu.test(file.name)) return parseJSON(await file.text());
+    const bytes = await file.arrayBuffer();
+    let decoded;
+    try { decoded = new TextDecoder("utf-8",{fatal:true}).decode(bytes); }
+    catch { decoded = new TextDecoder("gb18030").decode(bytes); }
+    return parseCSV(decoded);
   }
 
   function parseJSON(text) {
@@ -152,7 +234,7 @@
 
   function open({round, openModal, onUse, onSave, initial, mode}) {
     let design = initial ? validate(initial) : round ? fromRound(round) : {
-      foodType: "", instructions: "", contributor: "", version: "1.0",
+      foodType: "", instructions: "", contributor: "", keywords: "", version: "1.0",
       traits: [{name:"",min:1,max:10,low:"",high:"",instructions:""}]
     };
     let panel;
@@ -182,6 +264,7 @@
       show("编辑评价模板",
         '<div class="tt-meta">'+field("食品类别","foodType",design.foodType)+
         '<div class="tt-pair">'+field("贡献者（选填）","contributor",design.contributor)+field("版本","version",design.version)+'</div>'+
+        field("搜索关键词（选填）","keywords",design.keywords)+
         field("评价总说明（选填）","instructions",design.instructions,"textarea")+'</div>'+
         '<section><div class="tt-heading"><h3>评价性状</h3><span>'+design.traits.length+' / 12</span></div>'+
         design.traits.map((t,i)=>traitForm(t,i,i===openIndex)).join("")+
@@ -193,7 +276,7 @@
         design = readDraft();
         try {
           if (action === "preview") { design = validate(design); preview(); }
-          if (action === "import") importer();
+          if (action === "import") importer(true);
           if (action === "add" && design.traits.length<12) {
             design.traits.push({name:"",min:1,max:10,low:"",high:"",instructions:""});
             edit(design.traits.length-1);
@@ -208,17 +291,16 @@
         } catch (error) { report(error.message); }
       });
     }
-    function importer() {
+    function importer(fromEditor = false) {
       const own = show("导入评价模板",
-        '<label class="tt-field">选择模板文件<input type="file" accept=".json,application/json" data-import-file></label>'+
-        '<label class="tt-field">或粘贴分享链接<textarea rows="3" data-import-link placeholder="粘贴小小品鉴家的完整模板链接"></textarea></label>'+
-        feedback+'<div class="tt-actions">'+button("back","返回编辑")+button("load","预览链接模板","action")+'</div>');
+        '<p class="help">用 Excel 打开示例表。保留列名，在第一条性状所在行填写食品信息，改完另存为 CSV UTF-8 后上传。</p>'+
+        '<label class="tt-field">上传 CSV 或 JSON<input type="file" accept=".csv,text/csv,.json,application/json" data-import-file></label>'+
+        '<div class="tt-actions">'+(fromEditor?button("back","返回编辑"):"")+button("example","下载示例表格 CSV","action")+'</div>'+feedback);
       own.querySelector("[data-import-file]").addEventListener("change", async event => {
         const file = event.target.files[0];
         if (!file) return;
         try {
-          if (file.size > maxFileSize) problem("模板文件超过 64 KB，请选择导出的模板 JSON。");
-          const template = parseJSON(await file.text());
+          const template = await readTemplateFile(file);
           if (!own.closest("dialog[open]")) return;
           design = template;
           preview();
@@ -228,14 +310,19 @@
       own.addEventListener("click", event => {
         const action = event.target.closest("[data-tt]")?.dataset.tt;
         if (action==="back") return edit();
-        if (action==="load") try {
-          design = fromURL(own.querySelector("[data-import-link]").value, location.href);
-          preview();
-        } catch (error) { report(error.message); }
+        if (action==="example") {
+          const url = URL.createObjectURL(new Blob([exampleCSV()],{type:"text/csv;charset=utf-8"}));
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = "小小品鉴家-评价模板示例.csv";
+          a.click();
+          setTimeout(()=>URL.revokeObjectURL(url),30000);
+        }
       });
     }
     function preview() {
       const content = '<div class="tt-identity"><h3>'+escape(design.foodType)+'</h3><p>版本 '+escape(design.version)+' · '+(design.contributor ? '贡献者 '+escape(design.contributor) : '未署名')+'</p></div>'+
+        (design.keywords?'<p class="tt-instructions">关键词 · '+escape(design.keywords)+'</p>':'')+
         (design.instructions?'<p class="tt-instructions">'+escape(design.instructions)+'</p>':'')+
         '<dl class="tt-rules">'+design.traits.map(t => '<div><dt>'+escape(t.name)+'</dt><dd><b>'+t.min+' 分</b> '+escape(t.low)+'<br><b>'+t.max+' 分</b> '+escape(t.high)+
           (t.instructions?'<p>'+escape(t.instructions)+'</p>':'')+'</dd></div>').join('')+'</dl>'+
@@ -296,6 +383,6 @@
     else edit();
   }
 
-  globalThis.TasterTemplates = {validate, fromRound, presets, readLink, shareLink, fromURL, open};
+  globalThis.TasterTemplates = {validate, fromRound, presets, matches, exampleCSV, parseCSV, readLink, shareLink, fromURL, open};
 })();
 

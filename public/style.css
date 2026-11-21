@@ -113,6 +113,11 @@ dialog::backdrop{background:#14271ed0;opacity:.46}
 .clip-row{display:flex;align-items:center;gap:10px 16px;flex-wrap:wrap;margin-top:12px}
 .clip-row audio{max-width:100%}
 .clip-row a{color:var(--green);font-size:14px}
+.cloud-list{display:grid;gap:10px;margin-top:12px}
+.cloud-list-row{display:flex;align-items:center;justify-content:space-between;gap:10px;border-bottom:1px solid var(--line);padding:9px 0}
+.cloud-qr{display:block;width:min(240px,100%);height:auto;margin:12px auto 0}
+.cloud-guest nav,.cloud-guest .topactions{display:none}
+.guest-status{margin-bottom:16px}
 .sample-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:16px 0}
 .sample-grid button{border:1px solid var(--line);border-radius:8px;padding:8px 3px;font-size:14px}
 .sample-grid button[aria-pressed=true]{outline:2px solid var(--green);outline-offset:-2px}
@@ -144,6 +149,8 @@ td .subtle{padding:3px}
 .sample-generic .switch{background:#13352c65}
 .sample-generic .switch:hover{background:#13352cac}
 .template-category{font-size:14px;color:var(--muted);margin:15px 0 8px}
+.template-search{margin:16px 0 8px}
+[data-template-search-status]{margin:5px 0 9px}
 .template-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,175px),1fr));gap:9px}
 .template-card{display:flex;align-items:flex-start;flex-direction:column;gap:5px;min-width:0;text-align:left;border:1px solid var(--line);background:#fafbf6;border-radius:10px;padding:13px;overflow-wrap:anywhere}
 .template-card:hover{background:#edf2e6;border-color:#a5b79a}

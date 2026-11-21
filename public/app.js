@@ -46,13 +46,15 @@
     state = blank();
     storageError = "本机存储暂时无法读取。可在当前页面评价并导出 Excel，关闭前请先导出。";
   }
-  const round = () => state.rounds.find(r => r.id === state.active);
+  let guest, routeId = 0;
+  const round = () => guest?.round ?? state.rounds.find(r => r.id === state.active);
   const sharedTemplates = TasterTemplates.presets();
   let page = "workspace", showNote = false, toastTimer, voiceSession = null;
   let lastFocused = null;
   const audioURLs = [];
   const dialog = $("#dialog");
   const sharing = TasterShareUI.create(openModal);
+  const cloud = TasterCloud.create(openModal,round);
   function notify(message) {
     $("#toast").textContent = message;
     $("#toast").classList.add("show");
@@ -60,6 +62,11 @@
     toastTimer = setTimeout(() => $("#toast").classList.remove("show"), 3800);
   }
   function persist() {
+    if (guest) {
+      const {records,drafts,current} = guest.round;
+      try { sessionStorage.setItem(guest.storageKey,JSON.stringify({evaluator:guest.evaluator,records,drafts,current})); } catch {}
+      return true;
+    }
     if (!storageError) {
       try {
         if (localStorage.getItem(storeKey) !== snapshot) throw Error("another tab");
@@ -102,9 +109,9 @@
       if (b.dataset.view === page) b.setAttribute("aria-current","page"); else b.removeAttribute("aria-current");
     });
     const previousId = state.active;
-    const r = page === "workspace" ? M.ensureScoringRound(state) : round();
+    const r = page === "workspace" && !guest ? M.ensureScoringRound(state) : round();
     if (state.active !== previousId) persist();
-    const names = { workspace:"品鉴工作台", records:"评价记录", community:"模板与共享" };
+    const names = { workspace:guest?"扫码品鉴":"品鉴工作台", records:"评价记录", community:"模板与共享" };
     const meta = '<div class="meta">'+icon("leaf")+esc(r.title)+'<span class="divider"></span>'+icon("user")+esc(r.rater)+'</div>';
     const savedCount = r.records.filter(x => x.rater === r.rater).length;
     const progress = '<div class="progress"><div><span>我的品鉴进度</span><span><b>'+savedCount+'</b> / '+r.samples.length+'</span></div><div class="track"><span style="width:'+100*savedCount/r.samples.length+'%"></span></div></div>';
@@ -138,17 +145,20 @@
     const sheetHelp = r.template?.instructions || "核对口述结果，也可点选分数。";
     const food = r.template?.foodType || "小麦饼干";
     const sampleClass = food.includes("饼干") ? "sample" : "sample sample-generic";
-    return '<section class="panel tasting-bar" aria-label="评鉴对象"><div class="tasting-selection"><span class="trait-icon tone3">'+icon("sample")+'</span><div><p>当前评鉴</p><h2>'+esc(food)+'</h2></div></div>'+
-      '<div class="panel-actions"><button class="action" data-action="catalog">'+icon("grid")+'选食品与模板</button><button class="ghost" data-action="organize">'+icon("sliders")+'管理场次</button></div></section>'+
+    const header = guest
+      ? '<p class="guest-status help">'+(r.records.length>=r.samples.length?"本场评分已全部提交。你可以切换样品查看或更新。":"核对实物盲码后口述或点选评分，分数会提交给本场主办人。")+'</p>'
+      : '<section class="panel tasting-bar" aria-label="评鉴对象"><div class="tasting-selection"><span class="trait-icon tone3">'+icon("sample")+'</span><div><p>当前评鉴</p><h2>'+esc(food)+'</h2></div></div>'+
+        '<div class="panel-actions"><button class="action" data-action="catalog">'+icon("grid")+'选食品与模板</button><button class="ghost" data-action="organize">'+icon("sliders")+'管理场次</button><button class="ghost" data-action="cloud">扫码收评</button></div></section>';
+    return header+
       '<section class="hero" aria-label="当前盲评样品与语音录入"><div class="'+sampleClass+'"><span class="sample-tag">'+icon("sample")+'当前样品</span><div class="sample-bottom"><div><small>样品盲码</small><div class="sample-code">'+esc(r.current)+'</div></div><button class="switch" data-action="samples">'+icon("swap")+'切换样品</button></div></div>'+
       '<div class="voice"><div class="voice-head"><h2>'+icon("wave")+'语音评分</h2><button data-action="text">'+icon("keyboard")+'文字录入</button></div><div class="wave-area"><div class="wave" aria-hidden="true">'+wave+'</div><button data-action="mic" class="mic" aria-label="开始语音评分">'+icon("mic")+'</button><div class="wave right" aria-hidden="true">'+wave+'</div></div>'+
       '<p class="voice-instruction">点麦克风口述，停顿后自动填分</p><p class="voice-example">试着说「'+esc(example)+'」</p></div></section>'+
       '<section class="panel"><div class="sheet-heading"><div><h2 class="section-title">'+icon("clipboard")+'性状评分表</h2><p>'+esc(sheetHelp)+'</p></div><span class="count-tag" id="score-count">已填 '+count+' / '+r.traits.length+'</span></div>'+
       '<div class="scale-label"><span>品质性状</span><span class="scale-range"><span>评分刻度</span><span>'+(r.template?"按各项量表":"1 低 · 10 高")+'</span></span><span>得分</span></div><div>'+rows+'</div>'+
-      ((showNote||d.note)?'<div class="note-box"><label for="note">品鉴备注</label><textarea id="note" maxlength="2000" placeholder="记下这块饼干的口感或香气">'+esc(d.note)+'</textarea></div>':"")+
-      '<div class="sheet-footer"><button class="subtle" data-action="note">'+icon("note")+'品鉴备注</button>'+
+      ((!guest&&(showNote||d.note))?'<div class="note-box"><label for="note">品鉴备注</label><textarea id="note" maxlength="2000" placeholder="记下样品的口感或香气">'+esc(d.note)+'</textarea></div>':"")+
+      '<div class="sheet-footer">'+(!guest?'<button class="subtle" data-action="note">'+icon("note")+'品鉴备注</button>':"")+
       (d.hasAudio?'<button class="subtle" data-action="voice-audio">'+icon("wave")+'录音</button>':"")+
-      '<button class="action" data-action="confirm">'+icon("check")+(M.findRecord(r)?"更新评价":"确认评分")+'</button></div></section>';
+      '<button class="action" data-action="confirm">'+icon("check")+(M.findRecord(r)?"更新评价":guest?"提交评分":"确认评分")+'</button></div></section>';
   }
   function recordsPage(r) {
     const historical = M.usesPreviousBiscuitTraits(r);
@@ -182,8 +192,28 @@
   }
   function catalogPage() {
     const saved = localTemplates();
-    return '<h3 class="template-category">示例模板</h3><div class="template-list">'+templateCards(sharedTemplates)+'</div>'+
-      (saved.length ? '<h3 class="template-category">本机模板</h3><div class="template-list">'+templateCards(saved,sharedTemplates.length)+'</div>' : "");
+    return '<div data-template-catalog><label class="field template-search">搜索评价模板'+
+      '<input type="search" data-template-search maxlength="80" placeholder="例如：小麦品质、刀削面" autocomplete="off"></label>'+
+      '<p class="help" data-template-search-status role="status" hidden></p>'+
+      '<section data-template-section><h3 class="template-category">示例模板</h3><div class="template-list">'+templateCards(sharedTemplates)+'</div></section>'+
+      (saved.length ? '<section data-template-section><h3 class="template-category">本机模板</h3><div class="template-list">'+templateCards(saved,sharedTemplates.length)+'</div></section>' : "")+'</div>';
+  }
+  function filterTemplates(input) {
+    const catalog = input.closest("[data-template-catalog]");
+    const templates = [...sharedTemplates,...localTemplates()];
+    let matches = 0;
+    for (const section of catalog.querySelectorAll("[data-template-section]")) {
+      let shown = 0;
+      for (const card of section.querySelectorAll("[data-template]")) {
+        card.hidden = !TasterTemplates.matches(templates[Number(card.dataset.template)],input.value);
+        if (!card.hidden) shown++;
+      }
+      section.hidden = shown === 0;
+      matches += shown;
+    }
+    const status = catalog.querySelector("[data-template-search-status]");
+    status.hidden = !input.value.trim();
+    status.textContent = matches ? "找到 "+matches+" 个模板" : "没有找到模板。可换个关键词，或新建模板。";
   }
   function communityPage(r) {
     return '<div class="settings-grid"><section class="panel setting-card"><h2 class="card-title">数据共享</h2><p class="help">分享评分汇总或数据说明卡，也可接收他人发来的共享文件。</p>'+roundPicker(r,"share-round-select")+
@@ -433,6 +463,7 @@
   }
 
   function saveCurrentScore(r, extra = "") {
+    if (guest?.round === r) { submitGuestScore(guest,extra); return; }
     try {
       const { record, done } = M.confirmScore(r);
       showNote = false;
@@ -443,6 +474,39 @@
         extra+(saved?"":" 请及时导出。"));
     } catch (error) {
       notify(error.message);
+    }
+  }
+  async function submitGuestScore(entry, extra) {
+    if (entry.pending) return;
+    const {round:r,evaluator} = entry;
+    let scores;
+    try { scores = M.checkedDraft(r).scores; }
+    catch (error) { notify(error.message); return; }
+    const main = $("#main");
+    entry.pending = true;
+    persist();
+    if (dialog.open) dialog.close();
+    main.inert = true;
+    main.setAttribute("aria-busy","true");
+    notify("正在提交评分…");
+    try {
+      await TasterCloud.submit(r.id,evaluator,r.current,scores);
+      if (guest !== entry) return;
+      const {record,done} = M.confirmScore(r);
+      persist();
+      render();
+      notify(record.code+" 已提交"+(done?"，本场评分完成。":"，下一份是 "+r.current+"。")+extra);
+    } catch (error) {
+      if (guest === entry) {
+        render();
+        notify(error.message+" 草稿已保留，可重试。");
+      }
+    } finally {
+      entry.pending = false;
+      if (guest === entry) {
+        main.inert = false;
+        main.removeAttribute("aria-busy");
+      }
     }
   }
   function saveLocalTemplate(template) {
@@ -549,6 +613,7 @@
         break;
       }
       case "catalog": openCatalog(); break;
+      case "cloud": cloud.open(); break;
       case "organize": organizeRound(r); break;
       case "blank-template": templateEditor({ mode:"edit" }); break;
       case "round-template": templateEditor({ source:r, mode:"edit" }); break;
@@ -578,6 +643,7 @@
     }
   });
   document.addEventListener("input",event=>{
+    if (event.target.hasAttribute("data-template-search")) filterTemplates(event.target);
     if(event.target.hasAttribute("data-range-trait")) {
       const r=round(), input=event.target, t=r.traits[Number(input.dataset.rangeTrait)];
       const value=input.valueAsNumber, draft=M.draft(r);
@@ -597,8 +663,49 @@
       if (page === "workspace" && M.usesPreviousBiscuitTraits(round())) navigate("records"); else render();
     }
   });
+  async function openGuest(invite, revision) {
+    document.body.classList.add("cloud-guest");
+    $("#main").innerHTML = '<p role="status">正在读取场次…</p>';
+    const uuid = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/iu;
+    try {
+      if (!uuid.test(invite)) throw Error("评价链接格式有误。");
+      const data = await TasterCloud.join(invite);
+      if (revision !== routeId) return;
+      if (!data?.codes?.length) throw Error("场次不存在或已暂停收评。");
+      const storageKey = "little-taster.guest."+invite;
+      let saved;
+      try { saved = JSON.parse(sessionStorage.getItem(storageKey)); } catch {}
+      const evaluator = saved && uuid.test(saved.evaluator) ? saved.evaluator : crypto.randomUUID();
+      const r = M.makeRound({
+        title:data.title, template:TasterTemplates.validate(data.template),
+        codedSamples:data.codes.map(code=>({code,name:""})), rater:"匿名评价员"
+      });
+      r.id = data.id;
+      if (saved) {
+        r.current = data.codes.includes(saved.current) ? saved.current : r.current;
+        if (Array.isArray(saved.records)) r.records = saved.records;
+        if (saved.drafts && typeof saved.drafts === "object") r.drafts = saved.drafts;
+      }
+      guest = { round:r, storageKey, evaluator };
+      page = "workspace";
+      persist(); render();
+    } catch (error) {
+      if (revision === routeId) $("#main").innerHTML = '<section class="panel setting-card"><h1>无法打开评价</h1><p class="help">'+esc(error.message)+'</p></section>';
+    }
+  }
   function route() {
     const hash=location.hash;
+    const revision = ++routeId;
+    if (guest || document.body.classList.contains("cloud-guest")) {
+      stopRecognition();
+      if (dialog.open) dialog.close();
+      showNote = false;
+      guest = null;
+      $("#main").inert = false;
+      $("#main").removeAttribute("aria-busy");
+      document.body.classList.remove("cloud-guest");
+    }
+    if (hash.startsWith("#join=")) { openGuest(hash.slice(6),revision); return; }
     if(hash.startsWith("#template=") || /^#(data|request|decision)=/.test(hash)) {
       stopRecognition();
       page="community";
@@ -612,5 +719,6 @@
     if(next!==page || dialog.open) navigate(next); else render();
   }
   window.addEventListener("hashchange",route);
-  persist(); route();
+  if (!location.hash.startsWith("#join=")) persist();
+  route();
 })();
