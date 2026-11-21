@@ -9,7 +9,7 @@
     ['风味', '風味'],
   ];
 
-  const digits = '零一二三四五六七八九十';
+  const digits = '零一二三四五六七八九';
   const numberPattern = '[负負−+\\-]?\\s*[0-9零〇一二两兩三四五六七八九十百千万]+(?:[.点點][0-9零〇一二两兩三四五六七八九十]+)?';
   const scoreAtStart = new RegExp(`^(?:的)?(?:这一项|这一块|这项|方面)?(?:我(?:觉得|认为|会)?)?(?:评分|得分|打分|打个|给个|给到|打|给)?(?:为|是)?\\s*(${numberPattern})\\s*(分)?(.*)$`, 'u');
   const explicitScore = new RegExp(`^(?:我)?(?:给到|给个|打个|打|给|评分为|得分为)\\s*(${numberPattern})\\s*(分)?(.*)$`, 'u');
@@ -21,13 +21,26 @@
   }
 
   function readInteger(token) {
-    const value = token.trim().replace(/[两兩]/gu, '二');
-    if (/^\d+$/u.test(value)) return Number(value);
-    if (value.length === 1) return digits.indexOf(value);
-    return NaN;
+    const signed = token.trim().replace(/[负負−]/gu, '-').replace(/[两兩]/gu, '二').replace(/〇/gu, '零');
+    const sign = signed.startsWith('-') ? -1 : 1;
+    const value = signed.replace(/^[-+]\s*/u, '');
+    if (/^\d+$/u.test(value)) return sign * Number(value) || 0;
+    if (value.length === 1 && digits.includes(value)) return sign * digits.indexOf(value) || 0;
+    if (value === '一千') return sign * 1000;
+    // Require explicit place values. For example 七八 and 一百二 have ambiguous spoken meanings.
+    const hundreds = value.match(/^([一二三四五六七八九])百(.*)$/u);
+    const base = hundreds ? digits.indexOf(hundreds[1]) * 100 : 0;
+    const remainder = hundreds ? hundreds[2] : value;
+    if (hundreds && !remainder) return sign * base;
+    if (hundreds && /^零[一二三四五六七八九]$/u.test(remainder)) {
+      return sign * (base + digits.indexOf(remainder[1]));
+    }
+    const tens = remainder.match(/^([一二三四五六七八九])?十([一二三四五六七八九])?$/u);
+    if (!tens) return NaN;
+    return sign * (base + (tens[1] ? digits.indexOf(tens[1]) : 1) * 10 + (tens[2] ? digits.indexOf(tens[2]) : 0));
   }
 
-  function getScore(fragment) {
+  function getScore(fragment, { min = 1, max = 10 } = {}) {
     const clauses = fragment.trim().replace(/^[\s:：,，、]+/u, '').split(punctuation)
       .map(clause => clause.trim()).filter(Boolean);
     const candidates = [];
@@ -40,8 +53,8 @@
       }
       const [, token, unit, rest] = match;
       const value = readInteger(token);
-      if (!Number.isInteger(value) || value < 1 || value > 10) {
-        return { issue: '需要 1–10 的整数，请确认' };
+      if (!Number.isInteger(value) || value < min || value > max) {
+        return { issue: '需要 ' + min + ' 到 ' + max + ' 之间的整数，请确认' };
       }
       // Bare numerals in phrases such as “两条裂纹” or “八成” are observations, not scores.
       if ((!unit && rest.trim()) || /^(?:半|之|钟|鐘|之一|贝|贝尔)/u.test(rest.trim()) || extraScore.test(rest)) {
@@ -58,8 +71,9 @@
     return value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
   }
 
-  function parse(text, traits) {
+  function parse(text, traits, rules = []) {
     const transcript = normalize(text || '');
+    const ranges = new Map(rules.map(rule => [rule.name, rule]));
     const labels = new Map(traits.filter(trait => typeof trait === 'string' && trait.trim())
       .map(trait => [normalize(trait), trait]));
     const names = new Map(labels);
@@ -75,7 +89,7 @@
     for (const [index, mention] of mentions.entries()) {
       const trait = names.get(mention[0]);
       const fragment = transcript.slice(mention.index + mention[0].length, mentions[index + 1]?.index);
-      const current = getScore(fragment);
+      const current = getScore(fragment, ranges.get(trait));
       const earlier = outcomes.get(trait);
       if (earlier && (earlier.issue || current.issue || earlier.value !== current.value)) {
         outcomes.set(trait, { issue: '前后评分不明确，请确认' });

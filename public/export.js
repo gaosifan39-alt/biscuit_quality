@@ -33,11 +33,11 @@
     return { value: String(value ?? ""), style, numeric: false };
   }
 
-  function scoreCell(value) {
+  function scoreCell(value, { min = 1, max = 10 } = {}) {
     if (value == null || value === "") return textCell("");
-    const score = Number(value);
-    if (!Number.isInteger(score) || score < 1 || score > 10) {
-      throw new Error("评分应为 1 至 10 的整数，请检查后再导出。");
+    const score = typeof value === "string" && value.trim() ? Number(value) : value;
+    if (!Number.isInteger(score) || score < min || score > max) {
+      throw new Error(`评分应为 ${min} 至 ${max} 的整数，请检查后再导出。`);
     }
     return { value: score, style: 2, numeric: true };
   }
@@ -156,34 +156,49 @@
     return bytes;
   }
 
-  function build({ title = "", traits, samples, records, rater = "" }) {
+  function build({ title = "", traits, samples, records, rater = "", template }) {
     const names = new Map(samples.map(sample => [sample.code, sample.name]));
+    const rules = new Map((template?.traits || []).map(rule => [rule.name, rule]));
     const headers = ["盲码", "品种名称", "评价人", ...traits, "品鉴备注", "记录时间（北京时间）", "品鉴批次"];
     const widths = [14, 25, 18, ...traits.map(trait => Math.min(65, Math.max(13, trait.length * 2 + 5))), 44, 27, 30];
     const rows = records.map(record => [
       textCell(record.code), textCell(names.get(record.code)), textCell(record.rater ?? rater),
-      ...traits.map(trait => scoreCell(record.scores?.[trait])), textCell(record.note), timeCell(record.at), textCell(title)
+      ...traits.map(trait => scoreCell(record.scores?.[trait], rules.get(trait))), textCell(record.note), timeCell(record.at), textCell(title)
     ]);
     const prefix = "application/vnd.openxmlformats-officedocument.spreadsheetml.";
     const rels = entries => xmlDeclaration + `<Relationships xmlns="${packageRelNS}">` +
       entries.map(([id, type, target]) => `<Relationship Id="${id}" Type="${relNS}/${type}" Target="${target}"/>`).join("") + "</Relationships>";
+    const sheets = [
+      ["评分明细", worksheet(headers, widths, rows)],
+      ["盲码对照", worksheet(["盲码", "品种名称"], [14, 30], samples.map(sample => [textCell(sample.code), textCell(sample.name)]))]
+    ];
+    if (template) {
+      const scaleRows = template.traits.map(rule => [
+        textCell(rule.name), scoreCell(rule.min, rule), scoreCell(rule.max, rule), textCell(rule.low), textCell(rule.high),
+        textCell(rule.instructions), textCell(template.foodType), textCell(template.instructions),
+        textCell(template.contributor), textCell(template.version)
+      ]);
+      sheets.push(["评分量表", worksheet(
+        ["性状", "下限", "上限", "下限含义", "上限含义", "性状说明", "食品类型", "模板说明", "贡献者", "模板版本"],
+        [20, 12, 12, 28, 28, 45, 20, 45, 24, 18], scaleRows
+      )]);
+    }
+    const sheetParts = sheets.map((_, i) => `worksheets/sheet${i + 1}.xml`);
     return writeZip({
       "[Content_Types].xml": xmlDeclaration + `<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
         <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/>
         <Override PartName="/xl/workbook.xml" ContentType="${prefix}sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="${prefix}styles+xml"/>
-        <Override PartName="/xl/worksheets/sheet1.xml" ContentType="${prefix}worksheet+xml"/><Override PartName="/xl/worksheets/sheet2.xml" ContentType="${prefix}worksheet+xml"/>
+        ${sheetParts.map(path => `<Override PartName="/xl/${path}" ContentType="${prefix}worksheet+xml"/>`).join("")}
       </Types>`,
       "_rels/.rels": rels([["rId1", "officeDocument", "xl/workbook.xml"]]),
       "xl/workbook.xml": xmlDeclaration + `<workbook xmlns="${mainNS}" xmlns:r="${relNS}"><bookViews><workbookView/></bookViews><sheets>
-        <sheet name="评分明细" sheetId="1" r:id="rId1"/><sheet name="盲码对照" sheetId="2" r:id="rId2"/>
+        ${sheets.map(([name], i) => `<sheet name="${name}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`).join("")}
       </sheets></workbook>`,
       "xl/_rels/workbook.xml.rels": rels([
-        ["rId1", "worksheet", "worksheets/sheet1.xml"], ["rId2", "worksheet", "worksheets/sheet2.xml"], ["rId3", "styles", "styles.xml"]
+        ...sheetParts.map((path, i) => ["rId" + (i + 1), "worksheet", path]), ["rIdStyle", "styles", "styles.xml"]
       ]),
       "xl/styles.xml": xmlDeclaration + styles,
-      "xl/worksheets/sheet1.xml": worksheet(headers, widths, rows),
-      "xl/worksheets/sheet2.xml": worksheet(["盲码", "品种名称"], [14, 30],
-        samples.map(sample => [textCell(sample.code), textCell(sample.name)]))
+      ...Object.fromEntries(sheets.map(([, content], i) => ["xl/" + sheetParts[i], content]))
     });
   }
 

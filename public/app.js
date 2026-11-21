@@ -47,6 +47,7 @@
   let page = "workspace", showNote = false, toastTimer, recognition = null;
   let applyAfterRecording = false, lastFocused = null;
   const dialog = $("#dialog");
+  const sharing = TasterShareUI.create(openModal);
   function notify(message) {
     $("#toast").textContent = message;
     $("#toast").classList.add("show");
@@ -90,7 +91,7 @@
       if (b.dataset.view === page) b.setAttribute("aria-current","page"); else b.removeAttribute("aria-current");
     });
     const r = round();
-    const names = { workspace:"饼干盲评工作台", records:"评价记录", settings:"场次设置" };
+    const names = { workspace:r.template ? "食品盲评工作台" : "饼干盲评工作台", records:"评价记录", settings:"场次设置" };
     const meta = '<div class="meta">'+icon("leaf")+esc(r.title)+'<span class="divider"></span>'+icon("user")+esc(r.rater)+'</div>';
     const savedCount = r.records.filter(x => x.rater === r.rater).length;
     const progress = '<div class="progress"><div><span>我的品鉴进度</span><span><b>'+savedCount+'</b> / '+r.samples.length+'</span></div><div class="track"><span style="width:'+100*savedCount/r.samples.length+'%"></span></div></div>';
@@ -104,31 +105,41 @@
   }
   function workspace(r) {
     const d = M.draft(r);
-    const count = r.traits.filter(t => M.valid(d.scores[t])).length;
+    const count = r.traits.filter(t => M.valid(d.scores[t],M.ruleFor(r,t))).length;
     const rows = r.traits.map((t,i) => {
       const [symbol, desc, tone] = traitsInfo[t] || ["leaf","按场次约定评分",i%5];
-      const buttons = Array.from({length:10},(_,n) => '<button type="button" data-trait="'+i+'" data-value="'+(n+1)+'" aria-label="'+esc(t)+' '+(n+1)+' 分" aria-pressed="'+(d.scores[t]===n+1)+'">'+(n+1)+'</button>').join("");
-      return '<div class="score-row"><div class="row-name"><span class="trait-icon tone'+tone+'">'+icon(symbol)+'</span><span><strong>'+esc(t)+'</strong><small>'+desc+'</small></span></div><div class="numbers" role="group" aria-label="'+esc(t)+'">'+buttons+'</div><div class="result '+(d.scores[t]?"scored":"")+'">'+(d.scores[t] ?? "—")+'</div></div>';
+      const rule = M.ruleFor(r,t), width = rule.max - rule.min + 1;
+      const description = r.template ? esc(rule.min+" 分 · "+rule.low+" / "+rule.max+" 分 · "+rule.high) : desc;
+      const controls = width>10 ? '<input type="number" step="1" min="'+rule.min+'" max="'+rule.max+'" data-range-trait="'+i+'" aria-label="'+esc(t)+'分数" placeholder="'+rule.min+' 至 '+rule.max+'" value="'+(d.scores[t] ?? "")+'">' :
+        Array.from({length:width},(_,n) => {
+          const score = n+rule.min;
+          return '<button type="button" data-trait="'+i+'" data-value="'+score+'" aria-label="'+esc(t)+' '+score+' 分" aria-pressed="'+(d.scores[t]===score)+'">'+score+'</button>';
+        }).join("");
+      return '<div class="score-row"><div class="row-name"><span class="trait-icon tone'+tone+'">'+icon(symbol)+'</span><span><strong>'+esc(t)+'</strong><small>'+description+'</small>'+(rule.instructions?'<small>'+esc(rule.instructions)+'</small>':'')+'</span></div><div class="numbers" style="--steps:'+(width>10?1:width)+'" role="group" aria-label="'+esc(t)+'">'+controls+'</div><div class="result '+(d.scores[t]!=null?"scored":"")+'">'+(d.scores[t] ?? "—")+'</div></div>';
     }).join("");
     const wave = makeWave();
-    const example = r.traits.slice(0,3).map((t,i)=>t+["八","七","九"][i]+"分").join("，");
+    const example = r.traits.slice(0,3).map((t,i)=>{
+      const rule = M.ruleFor(r,t);
+      return t+(r.template ? Math.round((rule.min+rule.max)/2) : ["八","七","九"][i])+"分";
+    }).join("，");
     return '<section class="hero" aria-label="当前盲评样品与语音录入"><div class="sample"><span class="sample-tag">'+icon("sample")+'当前样品</span><div class="sample-bottom"><div><small>样品盲码</small><div class="sample-code">'+esc(r.current)+'</div></div><button class="switch" data-action="samples">'+icon("swap")+'切换样品</button></div></div>'+
       '<div class="voice"><div class="voice-head"><h2>'+icon("wave")+'语音评分</h2><button data-action="text">'+icon("keyboard")+'文字录入</button></div><div class="wave-area"><div class="wave" aria-hidden="true">'+wave+'</div><button data-action="mic" class="mic" aria-label="开始语音评分">'+icon("mic")+'</button><div class="wave right" aria-hidden="true">'+wave+'</div></div>'+
       '<p class="voice-instruction">点击麦克风，口述评分</p><p class="voice-example">试着说「'+esc(example)+'」</p></div></section>'+
-      '<section class="panel"><div class="sheet-heading"><div><h2 class="section-title">'+icon("clipboard")+'性状评分表</h2><p>核对口述结果，也可点选分数。分数越高，表示程度或满意度越高。</p></div><span class="count-tag">已填 '+count+' / '+r.traits.length+'</span></div>'+
-      '<div class="scale-label"><span>品质性状</span><span class="scale-range"><span>评分刻度</span><span>1 低 · 10 高</span></span><span>得分</span></div><div>'+rows+'</div>'+
+      '<section class="panel"><div class="sheet-heading"><div><h2 class="section-title">'+icon("clipboard")+'性状评分表</h2><p>'+esc(r.template ? r.template.instructions || "请按各项量表评分。" : "核对口述结果，也可点选分数。分数越高，表示程度或满意度越高。")+'</p></div><span class="count-tag" id="score-count">已填 '+count+' / '+r.traits.length+'</span></div>'+
+      '<div class="scale-label"><span>品质性状</span><span class="scale-range"><span>评分刻度</span><span>'+(r.template?"按各项量表":"1 低 · 10 高")+'</span></span><span>得分</span></div><div>'+rows+'</div>'+
       ((showNote||d.note)?'<div class="note-box"><label for="note">品鉴备注</label><textarea id="note" maxlength="2000" placeholder="记下这块饼干的口感或香气">'+esc(d.note)+'</textarea></div>':"")+
       '<div class="sheet-footer"><button class="subtle" data-action="note">'+icon("note")+'品鉴备注</button><button class="action" data-action="confirm">'+icon("check")+(M.findRecord(r)?"更新评价":"确认评分")+'</button></div></section>';
   }
   function recordsPage(r) {
+    const closeout = '<section class="panel closeout"><div><h2>本场小结</h2><p class="help">已确认 '+r.records.length+' 条评价 · 原始记录保存在本机</p></div><button class="ghost" data-action="share-data">分享本场数据</button></section>';
     const header = '<div class="sheet-heading"><h2 class="section-title">'+icon("list")+'已确认的评价</h2><span class="count-tag">'+r.records.length+' 条记录</span></div>';
-    if (!r.records.length) return '<section class="panel">'+header+'<div class="empty">'+icon("clipboard")+'<h3>还没有已确认的评价</h3><p>在工作台确认第一份样品评分后，即可在这里查看和导出。</p><button class="action" data-action="home">去评价</button></div></section>';
+    if (!r.records.length) return '<section class="panel">'+header+'<div class="empty">'+icon("clipboard")+'<h3>还没有已确认的评价</h3><p>在工作台确认第一份样品评分后，即可在这里查看和导出。</p><button class="action" data-action="home">去评价</button></div></section>'+closeout;
     const rows = r.records.map((x,i) => '<tr><td><b>'+esc(x.code)+'</b></td><td>'+esc(x.rater)+'</td>'+r.traits.map(t=>'<td>'+esc(x.scores[t])+'</td>').join("")+'<td>'+esc(x.note || "—")+'</td><td><button class="subtle" data-edit="'+i+'">'+icon("note")+'修改</button></td></tr>').reverse().join("");
-    return '<section class="panel">'+header+'<div class="table-wrap"><table><thead><tr>'+["盲码","评价员",...r.traits,"备注","操作"].map(t=>'<th>'+esc(t)+'</th>').join("")+'</tr></thead><tbody>'+rows+'</tbody></table></div></section>';
+    return '<section class="panel">'+header+'<div class="table-wrap"><table><thead><tr>'+["盲码","评价员",...r.traits,"备注","操作"].map(t=>'<th>'+esc(t)+'</th>').join("")+'</tr></thead><tbody>'+rows+'</tbody></table></div></section>'+closeout;
   }
   function settingsPage(r) {
     const options = state.rounds.map((s,i)=>'<option value="'+esc(s.id)+'" '+(s===r?"selected":"")+'>'+esc(s.title)+' · 场次 '+(i+1)+'</option>').join("");
-    return '<div class="settings-grid"><section class="panel setting-card"><h2 class="card-title">本机场次</h2><label class="field">选择场次<select id="round-select">'+options+'</select></label><dl class="summary-list"><dt>盲评样品</dt><dd>'+r.samples.length+' 份</dd><dt>评价性状</dt><dd>'+r.traits.map(esc).join("、")+'</dd><dt>已确认评价</dt><dd>'+r.records.length+' 条</dd></dl><div class="settings-actions"><button class="action" data-action="new-round">'+icon("plus")+'新建场次</button><button class="ghost" data-action="mapping">'+icon("eye")+'组织者对照表</button></div></section>'+
+    return '<div class="settings-grid"><section class="panel setting-card"><h2 class="card-title">本机场次</h2><label class="field">选择场次<select id="round-select">'+options+'</select></label><dl class="summary-list"><dt>盲评样品</dt><dd>'+r.samples.length+' 份</dd><dt>评价性状</dt><dd>'+r.traits.map(esc).join("、")+'</dd><dt>已确认评价</dt><dd>'+r.records.length+' 条</dd></dl><div class="settings-actions"><button class="action" data-action="new-round">'+icon("plus")+'新建场次</button><button class="ghost" data-action="templates">使用共享模板</button><button class="ghost" data-action="mapping">'+icon("eye")+'组织者对照表</button></div></section>'+
       '<section class="panel setting-card"><h2 class="card-title">当前评价员</h2><p class="help">同一设备可以轮流试吃。换人时输入不同的姓名或代号，各自的评价会单独记录。</p><form id="rater-form"><label class="field">姓名或代号<input name="rater" value="'+esc(r.rater)+'" maxlength="40" required></label><button class="ghost">保存评价员</button></form></section></div>';
   }
   function openModal(title, content, focusSelector) {
@@ -149,7 +160,9 @@
   function voiceEditor(startMic = false) {
     const r = round();
     const dialogText = M.draft(r).transcript || "";
-    openModal("口述评分 · "+r.current,'<p class="help">每项说出性状名称和分数，可一次说多项。浏览器的语音服务可能联网处理声音。</p><label class="field">口述文本<textarea id="speech-text" maxlength="2000" rows="4" placeholder="例如：'+esc(r.traits[0])+'八分">'+esc(dialogText)+'</textarea></label><p class="issues" id="speech-feedback" role="status"></p><div class="group-actions"><button class="ghost" id="record-btn" data-action="record">'+icon("mic")+'开始录音</button><button class="action" data-action="parse">填入评分表</button></div>',startMic ? "#record-btn" : "#speech-text");
+    const firstRule = M.ruleFor(r,r.traits[0]);
+    const firstExample = r.traits[0]+(r.template ? Math.round((firstRule.min+firstRule.max)/2) : "八")+"分";
+    openModal("口述评分 · "+r.current,'<p class="help">每项说出性状名称和分数，可一次说多项。浏览器的语音服务可能联网处理声音。</p><label class="field">口述文本<textarea id="speech-text" maxlength="2000" rows="4" placeholder="例如：'+esc(firstExample)+'">'+esc(dialogText)+'</textarea></label><p class="issues" id="speech-feedback" role="status"></p><div class="group-actions"><button class="ghost" id="record-btn" data-action="record">'+icon("mic")+'开始录音</button><button class="action" data-action="parse">填入评分表</button></div>',startMic ? "#record-btn" : "#speech-text");
     if (startMic) startRecording();
   }
   function startRecording() {
@@ -198,7 +211,7 @@
       return;
     }
     const r = round(), text = $("#speech-text").value.trim();
-    const parsed = TasterVoice.parse(text,r.traits);
+    const parsed = TasterVoice.parse(text,r.traits,r.template?.traits);
     if (parsed.issues.length || !Object.keys(parsed.scores).length) {
       $("#speech-feedback").textContent = parsed.issues.join("\n") || "请说出或输入性状名称和分数。";
       return;
@@ -206,21 +219,37 @@
     const d = M.draft(r);
     Object.assign(d.scores,parsed.scores);
     delete d.transcript;
-    const missing = r.traits.filter(t => !M.valid(d.scores[t]));
+    const missing = r.traits.filter(t => !M.valid(d.scores[t],M.ruleFor(r,t)));
     persist(); dialog.close(); render();
     notify(missing.length ? "还差"+missing.join("、")+"，可继续口述或点选。" : "评分已填齐，请核对后确认。");
   }
-  function newRoundForm() {
-    openModal("新建盲评场次",'<form id="new-form"><label class="field">场次名称<input name="title" placeholder="例如：冬小麦饼干第一轮" maxlength="60" required></label><label class="field">品种名称<textarea name="names" rows="4" required maxlength="10000" placeholder="每行一个品种"></textarea><small>输入 1–200 个品种。创建后会随机分配盲码，请按对照表为实物贴签。</small></label><label class="field">评价性状<input name="traits" required maxlength="250" value="'+M.traits.join("、")+'"><small>用顿号或逗号分隔，最多 12 项，每项按 1–10 分评价。</small></label><p id="form-feedback" class="issues" role="status"></p><div class="group-actions"><button class="action">创建场次</button></div></form>',"input");
+  function templateEditor(initial, formDraft = {}) {
+    const seed = formDraft.traits?.trim()
+      ? { traits:formDraft.traits.split(/[、,，]/).map(s=>s.trim()).filter(Boolean) }
+      : round();
+    try {
+      TasterTemplates.open({
+        round:seed, openModal, initial,
+        onUse:template=>newRoundForm(TasterTemplates.validate(template),formDraft)
+      });
+    } catch(e) { notify(e.message); }
+  }
+  function newRoundForm(template, formDraft = {}) {
+    const ruleField = template
+      ? '<div class="share-purpose"><strong>'+esc(template.foodType)+' · '+esc(template.version)+'</strong><p>'+template.traits.map(rule=>esc(rule.name)+' '+rule.min+'–'+rule.max).join('、')+'</p></div>'
+      : '<label class="field">评价性状<input name="traits" required maxlength="250" value="'+esc(formDraft.traits ?? M.traits.join("、"))+'"><small>用顿号或逗号分隔，最多 12 项，每项按 1–10 分评价。</small></label>';
+    openModal("新建盲评场次",'<form id="new-form"><button type="button" class="ghost" data-action="templates">'+(template?'修改模板副本':'使用共享模板')+'</button><label class="field">场次名称<input name="title" value="'+esc(formDraft.title ?? (template ? template.foodType+'盲评' : ''))+'" placeholder="例如：冬小麦饼干第一轮" maxlength="60" required></label><label class="field">品种名称<textarea name="names" rows="4" required maxlength="10000" placeholder="每行一个品种">'+esc(formDraft.names || '')+'</textarea><small>输入 1–200 个品种。创建后会随机分配盲码，请按对照表为实物贴签。</small></label>'+ruleField+'<p id="form-feedback" class="issues" role="status"></p><div class="group-actions"><button class="action">创建场次</button></div></form>',"input");
+    $("#new-form").tastingTemplate = template;
   }
   function createRound(form) {
     const data = new FormData(form), title = data.get("title").trim();
     const names = data.get("names").split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
-    const dimensions = data.get("traits").split(/[、,，]/).map(s=>s.trim()).filter(Boolean);
+    const template = form.tastingTemplate;
+    const dimensions = template ? template.traits.map(rule=>rule.name) : data.get("traits").split(/[、,，]/).map(s=>s.trim()).filter(Boolean);
     if (!title || !names.length || names.length>200 || names.some(x=>x.length>80) || !dimensions.length || dimensions.length>12 || dimensions.some(s=>s.length>20 || s in Object.prototype) || new Set(dimensions).size!==dimensions.length) {
       $("#form-feedback").textContent = "请填写场次名称、1–200 行品种（每行最多 80 字），以及 1–12 个不同性状（每项最多 20 字）。"; return;
     }
-    const r = M.makeRound({ title, names, dimensions, rater:round().rater });
+    const r = M.makeRound({ title, names, dimensions, template, rater:template ? "评价员 01" : round().rater });
     state.rounds.push(r); state.active = r.id;
     persist(); dialog.close(); navigate("settings"); notify("新场次已创建，可查看盲码对照表为实物贴签。");
   }
@@ -281,6 +310,12 @@
         break;
       }
       case "new-round": newRoundForm(); break;
+      case "templates": {
+        const form = $("#new-form");
+        templateEditor(form?.tastingTemplate, form ? Object.fromEntries(new FormData(form)) : {});
+        break;
+      }
+      case "share-data": sharing.ownerRound(r); break;
       case "mapping": showMapping(); break;
       case "save-map":
         dialog.querySelectorAll("[data-mapping]").forEach(input=>r.samples[Number(input.dataset.mapping)].name=input.value.trim());
@@ -299,13 +334,35 @@
     }
   });
   document.addEventListener("input",event=>{
+    if(event.target.hasAttribute("data-range-trait")) {
+      const r=round(), input=event.target, t=r.traits[Number(input.dataset.rangeTrait)];
+      const value=input.valueAsNumber, draft=M.draft(r);
+      if(M.valid(value,M.ruleFor(r,t))) draft.scores[t]=value; else delete draft.scores[t];
+      const result=input.closest(".score-row").querySelector(".result");
+      result.textContent=draft.scores[t] ?? "—"; result.classList.toggle("scored",draft.scores[t]!=null);
+      $("#score-count").textContent="已填 "+r.traits.filter(k=>M.valid(draft.scores[k],M.ruleFor(r,k))).length+" / "+r.traits.length;
+      persist();
+    }
     if(event.target.id==="note") { M.draft(round()).note=event.target.value; persist(); }
     if(event.target.id==="speech-text"){ M.draft(round()).transcript=event.target.value; persist(); }
   });
   document.addEventListener("change",event=>{
     if(event.target.id==="round-select") { state.active=event.target.value; showNote=false; persist(); render(); }
   });
-  window.addEventListener("hashchange",()=>{const next=location.hash.slice(1);if(next!==page) navigate(next);});
-  page = knownPages.includes(location.hash.slice(1)) ? location.hash.slice(1) : "workspace";
-  persist(); render();
+  function route() {
+    const hash=location.hash;
+    if(hash.startsWith("#template=") || /^#(data|request|decision)=/.test(hash)) {
+      stopRecognition();
+      page=hash.startsWith("#template=") ? "settings" : "records";
+      render();
+      if(page==="records") { sharing.fromHash(hash); return; }
+      try { templateEditor(TasterTemplates.readLink(hash)); }
+      catch(e) { openModal("模板无法打开",'<p class="issues">'+esc(e.message)+'</p>'); }
+      return;
+    }
+    const next=knownPages.includes(hash.slice(1)) ? hash.slice(1) : "workspace";
+    if(next!==page || dialog.open) navigate(next); else render();
+  }
+  window.addEventListener("hashchange",route);
+  persist(); route();
 })();

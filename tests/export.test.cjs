@@ -65,3 +65,26 @@ test("out-of-range scores are flagged at export", () => {
   round.records[0].scores.裂纹 = 11;
   assert.throws(() => TasterExport.build(round), /1 至 10/);
 });
+
+test("custom ranges export as numbers, with the round's rubric for interpretation", () => {
+  const round = fixture();
+  round.template = { foodType: "饼干", version: "1.2", instructions: "先观察", contributor: "组员",
+    traits: [
+      { name: "色泽", min: -100, max: 100, low: "偏淡", high: "偏深", instructions: "对照色卡" },
+      { name: "裂纹", min: 0, max: 3, low: "无", high: "明显", instructions: "" }
+    ] };
+  round.records[0].scores = { 色泽: -90, 裂纹: 0 };
+  const parts = readSheets(TasterExport.build(round));
+  const sheet = parts["xl/worksheets/sheet1.xml"];
+  assert.match(sheet, /r="D2"[^>]*t="n"><v>-90<\/v>/);
+  assert.match(sheet, /r="E2"[^>]*t="n"><v>0<\/v>/);
+  assert.match(parts["xl/workbook.xml"], /name="评分量表"/);
+  for (const label of ["偏淡", "偏深", "对照色卡", "先观察", "组员", "1.2"]) {
+    assert.ok(parts["xl/worksheets/sheet3.xml"].includes(label));
+  }
+  for (const path of ["[Content_Types].xml", "xl/_rels/workbook.xml.rels"]) {
+    assert.match(parts[path], /worksheets\/sheet3.xml/);
+  }
+  round.records[0].scores.裂纹 = 4;
+  assert.throws(() => TasterExport.build(round), /0 至 3/);
+});

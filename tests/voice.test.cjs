@@ -60,3 +60,24 @@ test('speech results replace the prior provisional text and expose recoverable e
   assert.match(errors[0], /允许使用麦克风/u);
   assert.equal(ended, true);
 });
+
+test('applies per-trait ranges to aliases, signed numbers and canonical Chinese whole numbers', () => {
+  const rules = [{ name: '色泽', min: -100, max: 1000 }, { name: '甜度', min: 0, max: 3 }];
+  const names = rules.map(rule => rule.name);
+  for (const [spoken, value] of Object.entries({
+    '十六': 16, '二十': 20, '二十三': 23, '一百零三': 103, '一百一十': 110,
+    '兩百八十六': 286, '九百九十九': 999, '一千': 1000, '负一百': -100, '−８２': -82,
+    '負四十二': -42, '零': 0, '〇': 0, '+21': 21,
+  })) {
+    assert.deepEqual(parse('颜色' + spoken + '分，甜度零分', names, rules),
+      { scores: { 色泽: value, 甜度: 0 }, issues: [] }, spoken);
+  }
+  for (const invalid of ['负一百零一', '一百二', '一百百', '九十八或一百', '二十三点五']) {
+    const result = parse('色泽' + invalid + '分，甜度三分', names, rules);
+    assert.deepEqual(result.scores, { 甜度: 3 }, invalid);
+    assert.equal(result.issues.length, 1);
+  }
+  const result = parse('色泽十分，甜度十分', names, rules);
+  assert.deepEqual(result.scores, { 色泽: 10 });
+  assert.match(result.issues[0], /甜度.*0 到 3/);
+});

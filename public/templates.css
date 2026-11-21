@@ -1,0 +1,40 @@
+.tt-panel { display: grid; gap: 16px; overflow-wrap: anywhere; }
+.tt-panel .tt-meta,.tt-details { display:grid; gap:12px; }
+.tt-field { display:grid; gap:5px; min-width:0; font-size:.9rem; font-weight:600; }
+.tt-field input,.tt-field textarea { min-width:0; font-weight:400; font-size:1rem; }
+.tt-field textarea { min-height:4.3rem; }
+.tt-pair { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+.tt-heading,.tt-trait summary {display:flex; align-items:center; justify-content:space-between; gap:12px;}
+.tt-heading { margin:5px 0 10px; }
+.tt-heading h3,.tt-identity h3 { font-size:1.1rem; }
+.tt-heading span,.tt-trait small,.tt-identity p { color:var(--muted); font-size:.84rem; }
+.tt-trait { border:1px solid var(--line); border-radius:10px; margin:8px 0; }
+.tt-trait summary { cursor:pointer; padding:12px; font-weight:600; }
+.tt-trait summary::before { content:"＋"; color:var(--green); }
+.tt-trait[open] summary::before { content:"−"; }
+.tt-trait summary::-webkit-details-marker { display:none; }
+.tt-trait summary span { flex:1; }
+.tt-details { padding:12px; border-top:1px solid var(--line); }
+.tt-remove { justify-self:start; padding:6px 0; font-size:.9rem; color:#8b462b; }
+.tt-add { margin-top:10px; }
+.tt-actions,.tt-share { display:flex; flex-wrap:wrap; gap:8px; }
+.tt-actions { justify-content:flex-end; }
+.tt-actions button,.tt-share button { min-height:42px; }
+.tt-share { border-top:1px solid var(--line); padding-top:14px; }
+.tt-feedback { font-size:.9rem; color:#805126; white-space:pre-wrap; }
+.tt-feedback:empty { display:none; }
+.tt-identity { background:#edf2e6; padding:14px; border-radius:10px; }
+.tt-identity p { margin-top:3px; }
+.tt-instructions,.tt-rules dd { white-space:pre-wrap; }
+.tt-rules { margin:0; }
+.tt-rules > div { border-bottom:1px solid var(--line); padding:11px 0; }
+.tt-rules > div:first-child { padding-top:0; }
+.tt-rules dt { font-weight:700; }
+.tt-rules dd { margin:4px 0 0; font-size:.9rem; }
+.tt-rules dd b { color:var(--green); }
+.tt-rules dd p { margin-top:4px; color:var(--muted); }
+@media (max-width:480px) {
+  .tt-panel .tt-pair { gap:9px; }
+  .tt-actions > button,.tt-share > button { flex:1 1 42%; }
+}
+
