@@ -41,6 +41,41 @@ test('custom labels remain literal and take priority over overlapping synonyms',
 
 const biscuitTraits = ['色泽', '香气', '酥脆度', '甜度', '粘牙度', '总体喜好'];
 
+test('fills every score in the reported unpunctuated phone transcript', () => {
+  const expected = { 色泽: 5, 裂纹: 7, 酥脆度: 10, 粘牙度: 8, 风味: 9 };
+  for (const input of [
+    '色泽五分裂纹7分酥脆度10分年牙度8分风味9分',
+    '塞责五分裂纹7分酥脆度10分年牙8分风味9分',
+    '塞 责五分，裂纹七分、酥脆度十分，年 牙 度８分，风味９分',
+  ]) {
+    assert.deepEqual(parse(input, traits), { scores: expected, issues: [] });
+  }
+});
+
+test('all seven current biscuit scores keep their own value when dictated together', () => {
+  const seven = ['色泽', '香气', '酥脆度', '甜度', '粘牙度', '孔隙度', '总体喜好'];
+  const result = parse('塞责五分香气七分酥脆度10分甜度六分年牙度8分空隙度三分总体喜好九分', seven);
+  assert.deepEqual(result, {
+    scores: { 色泽: 5, 香气: 7, 酥脆度: 10, 甜度: 6, 粘牙度: 8, 孔隙度: 3, 总体喜好: 9 }, issues: [],
+  });
+  assert.deepEqual(parse('孔细度七分', seven).suggestions[0].choices, ['孔隙度']);
+});
+
+test('reported spellings follow the active template, range and conflict rules', () => {
+  assert.deepEqual(parse('塞责三分年牙五分', ['颜色', '黏牙程度']), {
+    scores: { 颜色: 3, 黏牙程度: 5 }, issues: [],
+  });
+  assert.deepEqual(parse('塞责三分年牙五分', ['色泽', '塞责', '年牙', '粘牙度']), {
+    scores: { 塞责: 3, 年牙: 5 }, issues: [],
+  });
+  const ambiguous = parse('年牙八分', ['粘牙', '粘牙度']);
+  assert.deepEqual(ambiguous.scores, {});
+  assert.deepEqual(new Set(ambiguous.suggestions[0].choices), new Set(['粘牙', '粘牙度']));
+  const result = parse('塞责六分色泽三分年牙十一分', traits);
+  assert.deepEqual(result.scores, {});
+  assert.equal(result.issues.length, 2);
+});
+
 test('common spoken names fill the six biscuit traits directly', () => {
   const result = parse('颜色八分，香味七分，酥脆九分，甜味五分，黏牙两分，整体喜好八分', biscuitTraits);
   assert.deepEqual(result, {
@@ -126,4 +161,27 @@ test('applies per-trait ranges to aliases, signed numbers and canonical Chinese 
   const result = parse('色泽十分，甜度十分', names, rules);
   assert.deepEqual(result.scores, { 色泽: 10 });
   assert.match(result.issues[0], /甜度.*0 到 3/);
+});
+
+test('an unrecognized scored item remains visible for editing at any position', () => {
+  for (const input of [
+    '米团八分色泽五分风味九分',
+    '色泽五分米团八分风味九分',
+    '色泽五分，风味九分，米团八分',
+  ]) {
+    const result = parse(input, traits);
+    assert.deepEqual(result.scores, { 色泽: 5, 风味: 9 });
+    assert.equal(result.issues.length, 1);
+    assert.match(result.issues[0], /米团八分/);
+  }
+});
+
+test('rating continuations, minutes, fractions and comments remain ordinary speech', () => {
+  for (const input of [
+    '色泽偏浅，我给五分，风味九分',
+    '色泽五分放凉三分钟，取饼干八分之一，风味九分',
+    '色泽五分，满分十分，风味九分',
+  ]) {
+    assert.deepEqual(parse(input, traits), { scores: { 色泽: 5, 风味: 9 }, issues: [] });
+  }
 });

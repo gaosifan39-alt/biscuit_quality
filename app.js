@@ -30,7 +30,9 @@
   document.querySelectorAll("[data-icon]").forEach(el => el.outerHTML = icon(el.dataset.icon));
   const traitsInfo = {
     "色泽":["sun","烘焙色泽满意度",0], "裂纹":["crack","表面裂纹明显程度",1], "酥脆度":["crisp","咬碎时的松脆程度",2],
-    "粘牙度":["drop","咀嚼后的粘牙程度",3], "风味":["aroma","香气与滋味满意度",4]
+    "粘牙度":["drop","咀嚼后的粘牙程度",3], "风味":["aroma","香气与滋味满意度",4],
+    "香气":["aroma","闻起来的香气浓淡",4], "甜度":["drop","入口后的甜味强弱",1],
+    "孔隙度":["eye","掰开饼干，看断面上孔洞所占的面积",0], "总体喜好":["user","你有多喜欢这款饼干",2]
   };
   const storeKey = "little-taster.workspace.v1";
   const blank = () => { const first = M.makeRound(); return { active: first.id, rounds: [first] }; };
@@ -91,7 +93,8 @@
       if (b.dataset.view === page) b.setAttribute("aria-current","page"); else b.removeAttribute("aria-current");
     });
     const r = round();
-    const names = { workspace:r.template ? "食品盲评工作台" : "饼干盲评工作台", records:"评价记录", settings:"场次设置" };
+    const isBiscuit = !r.template || r.template.foodType?.includes("饼干");
+    const names = { workspace:isBiscuit ? "饼干盲评工作台" : "食品盲评工作台", records:"评价记录", settings:"场次设置" };
     const meta = '<div class="meta">'+icon("leaf")+esc(r.title)+'<span class="divider"></span>'+icon("user")+esc(r.rater)+'</div>';
     const savedCount = r.records.filter(x => x.rater === r.rater).length;
     const progress = '<div class="progress"><div><span>我的品鉴进度</span><span><b>'+savedCount+'</b> / '+r.samples.length+'</span></div><div class="track"><span style="width:'+100*savedCount/r.samples.length+'%"></span></div></div>';
@@ -109,7 +112,7 @@
     const rows = r.traits.map((t,i) => {
       const [symbol, desc, tone] = traitsInfo[t] || ["leaf","按场次约定评分",i%5];
       const rule = M.ruleFor(r,t), width = rule.max - rule.min + 1;
-      const description = r.template ? esc(rule.min+" 分 · "+rule.low+" / "+rule.max+" 分 · "+rule.high) : desc;
+      const description = rule.low && rule.high ? esc(rule.min+" 分 · "+rule.low+" / "+rule.max+" 分 · "+rule.high) : desc;
       const controls = width>10 ? '<input type="number" step="1" min="'+rule.min+'" max="'+rule.max+'" data-range-trait="'+i+'" aria-label="'+esc(t)+'分数" placeholder="'+rule.min+' 至 '+rule.max+'" value="'+(d.scores[t] ?? "")+'">' :
         Array.from({length:width},(_,n) => {
           const score = n+rule.min;
