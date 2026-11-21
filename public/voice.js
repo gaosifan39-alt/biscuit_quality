@@ -152,7 +152,7 @@
     return heard === longer && longer[i] === longer[i - 1] && shorter.length >= 2 ? 2 : 1;
   }
 
-  function matchScoredPhrases(transcript, mentions, suggestions, names) {
+  function matchScoredPhrases(transcript, mentions, suggestions, names, autoMatch) {
     const issues = [];
     const forms = [...names].filter(([name]) => /^[\u3400-\u9fff]{2,20}$/u.test(name))
       .map(([name, trait]) => [soundKey(name), trait]);
@@ -188,7 +188,8 @@
         choices.add(trait);
       }
       if (!choices.size) {
-        if (!inside.length) issues.push('“' + phrase + '”未对应到本场性状，请修改这段文字后再填入。');
+        if (!inside.length) issues.push('“' + phrase + '”未对应到本场性状，' +
+          (autoMatch ? '请重说这项。' : '请修改这段文字后再填入。'));
         continue;
       }
       if (inside.length) {
@@ -197,7 +198,7 @@
         const superseded = suggestions.findIndex(suggestion => suggestion.start === earlier.index && suggestion.end === earlier.end);
         if (superseded !== -1) suggestions.splice(superseded, 1);
       }
-      if (best === 2 && choices.size === 1) {
+      if ((best === 2 || autoMatch) && choices.size === 1) {
         mentions.push({ index, end, trait: [...choices][0] });
       } else {
         mentions.push({ index, end });
@@ -209,7 +210,7 @@
     return issues;
   }
 
-  function parse(text, traits, rules = []) {
+  function parse(text, traits, rules = [], { autoMatch = false } = {}) {
     const transcript = normalize(text || '');
     const ranges = new Map(rules.map(rule => [rule.name, rule]));
     const labels = new Map(traits.filter(trait => typeof trait === 'string' && trait.trim())
@@ -231,7 +232,7 @@
         for (const form of phonetic) if (form.match.test(heard)) choices.add(form.trait);
         if (!choices.size) continue;
         const fullSoundMatch = !variants.has(spelling) && spelling.length >= 3;
-        if ((confirmed.has(spelling) || fullSoundMatch) && choices.size === 1) {
+        if ((confirmed.has(spelling) || fullSoundMatch || autoMatch) && choices.size === 1) {
           [trait] = choices;
         } else {
           suggestions.push({ heard, start: match.index, end, choices: [...choices] });
@@ -239,7 +240,7 @@
       }
       mentions.push({ index: match.index, end, trait });
     }
-    const issues = matchScoredPhrases(transcript, mentions, suggestions, names);
+    const issues = matchScoredPhrases(transcript, mentions, suggestions, names, autoMatch);
     const outcomes = new Map();
     for (const [index, mention] of mentions.entries()) {
       const { trait, end } = mention;
@@ -273,17 +274,20 @@
     'language-not-supported': '当前语音服务未提供中文识别，可以使用中文输入法语音。',
   };
 
-  function createRecognition({ onResult, onError, onEnd }) {
+  function createRecognition({ onResult, onError, onEnd, onActivity }) {
     const Recognition = globalThis.SpeechRecognition || globalThis.webkitSpeechRecognition;
     if (!Recognition) return null;
     const recognition = new Recognition();
     recognition.lang = 'zh-CN';
     recognition.continuous = true;
     recognition.interimResults = true;
+    recognition.onspeechstart = () => onActivity?.();
+    recognition.onspeechend = () => onActivity?.();
     recognition.onresult = event => {
       // Each event contains the session transcript, including revisions to interim hypotheses.
-      const transcript = Array.from(event.results, result => result[0]?.transcript || '').join('');
-      onResult(transcript);
+      const results = Array.from(event.results);
+      const read = result => result[0]?.transcript || '';
+      onResult(results.map(read).join(''), results.filter(result => result.isFinal).map(read).join(''));
     };
     recognition.onerror = event => {
       if (event.error === 'aborted') return;

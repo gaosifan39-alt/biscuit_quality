@@ -111,7 +111,8 @@
     const id = key(round.current, round.rater);
     if (!round.drafts[id]) {
       const record = findRecord(round);
-      round.drafts[id] = { scores: { ...record?.scores }, note: record?.note || "" };
+      round.drafts[id] = { scores: { ...record?.scores }, note: record?.note || "",
+        ...(record?.hasAudio ? { hasAudio: true } : {}) };
     }
     return round.drafts[id];
   }
@@ -127,7 +128,8 @@
       if (!valid(entry.scores[trait], rule)) throw Error(`请为“${trait}”填写 ${rule.min} 到 ${rule.max} 之间的整数评分。`);
     }
     const found = findRecord(round);
-    const record = { code: round.current, rater: round.rater, scores: { ...entry.scores }, note: entry.note.trim(), at: new Date().toISOString() };
+    const record = { code: round.current, rater: round.rater, scores: { ...entry.scores }, note: entry.note.trim(),
+      ...(entry.hasAudio ? { hasAudio: true } : {}), at: new Date().toISOString() };
     if (found) Object.assign(found, record);
     else round.records.push(record);
     delete round.drafts[key(round.current, round.rater)];

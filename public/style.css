@@ -110,6 +110,9 @@ dialog::backdrop{background:#14271ed0;opacity:.46}
 .field small{font-weight:400;color:var(--muted)}
 .group-actions{margin-top:18px;justify-content:flex-end}
 .issues{white-space:pre-line;color:#875021;font-size:14px;margin-top:10px}
+.clip-row{display:flex;align-items:center;gap:10px 16px;flex-wrap:wrap;margin-top:12px}
+.clip-row audio{max-width:100%}
+.clip-row a{color:var(--green);font-size:14px}
 .sample-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:16px 0}
 .sample-grid button{border:1px solid var(--line);border-radius:8px;padding:8px 3px;font-size:14px}
 .sample-grid button[aria-pressed=true]{outline:2px solid var(--green);outline-offset:-2px}
