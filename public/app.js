@@ -705,7 +705,12 @@
       $("#main").removeAttribute("aria-busy");
       document.body.classList.remove("cloud-guest");
     }
-    if (hash.startsWith("#join=")) { openGuest(hash.slice(6),revision); return; }
+    if (hash.startsWith("#join=")) {
+      stopRecognition();
+      if (dialog.open) dialog.close();
+      openGuest(hash.slice(6),revision);
+      return;
+    }
     if(hash.startsWith("#template=") || /^#(data|request|decision)=/.test(hash)) {
       stopRecognition();
       page="community";
@@ -721,4 +726,5 @@
   window.addEventListener("hashchange",route);
   if (!location.hash.startsWith("#join=")) persist();
   route();
+  cloud.finishEmailLogin();
 })();
