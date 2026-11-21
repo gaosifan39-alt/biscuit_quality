@@ -726,5 +726,4 @@
   window.addEventListener("hashchange",route);
   if (!location.hash.startsWith("#join=")) persist();
   route();
-  cloud.finishEmailLogin();
 })();

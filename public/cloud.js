@@ -5,7 +5,6 @@
   const origin = /^https:\/\/[a-z0-9-]+\.supabase\.co\/?$/i.test(config.url) ? config.url.replace(/\/$/,"") : "";
   const ready = Boolean(origin && /^sb_publishable_[\w-]+$/.test(config.publishableKey || ""));
   const loginKey = "little-taster.cloud.login.v1";
-  const pendingKey = "little-taster.cloud.pkce."+origin;
   const esc = value => String(value ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
   const button = (id,label,style="ghost") => '<button class="'+style+'" type="button" data-cloud="'+id+'">'+esc(label)+'</button>';
   let session;
@@ -70,45 +69,6 @@
     }
   }
 
-  function pendingLogin() {
-    try { return JSON.parse(localStorage.getItem(pendingKey)); }
-    catch { return null; }
-  }
-
-  async function sendLoginLink(email) {
-    // Each email link is bound to a verifier kept in the initiating browser.
-    const previous = pendingLogin();
-    const bytes = crypto.getRandomValues(new Uint8Array(32));
-    const verifier = Array.from(bytes,byte=>byte.toString(16).padStart(2,"0")).join("");
-    const digest = await crypto.subtle.digest("SHA-256",new TextEncoder().encode(verifier));
-    const challenge = btoa(String.fromCharCode(...new Uint8Array(digest))).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
-    try { localStorage.setItem(pendingKey,JSON.stringify({verifier,started:Date.now()})); }
-    catch { throw Error("浏览器无法保存登录状态，请允许这个网站保存数据后再试。"); }
-    try {
-      await request("/auth/v1/otp",{email,create_user:true,code_challenge:challenge,code_challenge_method:"s256"});
-    } catch (error) {
-      if (pendingLogin()?.verifier === verifier) {
-        if (previous) localStorage.setItem(pendingKey,JSON.stringify(previous));
-        else localStorage.removeItem(pendingKey);
-      }
-      if (error.status === 429 || !error.status) throw error;
-      throw Error("登录链接发送失败。演示时请用 Supabase 项目所属组织成员的邮箱。");
-    }
-  }
-
-  function takeAuthReturn() {
-    const url = new URL(location.href);
-    const code = url.searchParams.get("code");
-    const fragment = new URLSearchParams(url.hash.slice(1));
-    const failure = url.searchParams.has("error") || url.searchParams.has("error_code") ||
-      fragment.has("error") || fragment.has("error_code");
-    if (!code && !failure) return null;
-    for (const key of ["code","error","error_code","error_description"]) url.searchParams.delete(key);
-    if (fragment.has("error") || fragment.has("error_code")) url.hash = "";
-    history.replaceState(history.state,"",url);
-    return {code,failure};
-  }
-
   function download(blob,name) {
     const link = document.createElement("a");
     const url = URL.createObjectURL(blob);
@@ -160,44 +120,31 @@
       return panel;
     }
 
-    function login() {
-      view("主办人邮箱登录",'<form data-cloud="send">'+
-        '<label class="field">主办人邮箱<input type="email" name="email" autocomplete="email" maxlength="254" required></label>'+
-        '<div class="group-actions"><button class="action">发送登录链接</button></div></form>',{
+    function login(email = "") {
+      const emailField = '<label class="field">主办人邮箱<input type="email" name="email" autocomplete="email" maxlength="254" required></label>';
+      const tokenField = '<p class="help">验证码已发送到 '+esc(email)+'。</p><label class="field">邮箱验证码<input name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6,10}" required></label>';
+      view("主办人邮箱登录",'<form data-cloud="'+(email?"verify":"send")+'">'+(email?tokenField:emailField)+
+        '<div class="group-actions">'+(email?button("back","更换邮箱"):"")+'<button class="action">'+(email?"登录":"发送验证码")+'</button></div></form>',{
         send:async (form,panel)=>{
           const address = form.elements.email.value.trim();
-          await sendLoginLink(address);
-          if (panel.isConnected && panel.closest("dialog[open]")) {
-            view("请打开邮件",'<p class="help">登录链接已发送到 '+esc(address)+
-              '。请在这台设备的同一个浏览器打开邮件中的链接。首次登录时，邮件按钮可能写着 Confirm email address。</p>'+
-              '<div class="group-actions">'+button("back","返回邮箱登录")+'</div>',{back:login});
+          try { await request("/auth/v1/otp",{email:address,create_user:true}); }
+          catch (error) {
+            if (error.status === 429) throw error;
+            throw Error("验证码发送失败。请检查邮箱地址和项目的邮件配置。");
           }
-        }
+          if (panel.isConnected && panel.closest("dialog[open]")) login(address);
+        },
+        verify:async (form,panel)=>{
+          const code = form.elements.code.value.trim();
+          let auth;
+          try { auth = await request("/auth/v1/verify",{email,token:code,type:"email"}); }
+          catch { throw Error("验证码无效或已过期，请重新获取。"); }
+          if (!auth?.access_token) throw Error("登录未完成，请重试。");
+          setSession(auth);
+          if (panel.isConnected && panel.closest("dialog[open]")) await dashboard();
+        },
+        back:()=>login()
       });
-    }
-
-    async function finishEmailLogin() {
-      const result = takeAuthReturn();
-      if (!result) return;
-      const panel = view("主办人邮箱登录",'<p class="help">正在验证登录链接…</p>');
-      let message = "登录链接已失效，请返回并重新获取。";
-      try {
-        if (result.failure || !result.code) throw Error(message);
-        const pending = pendingLogin();
-        if (!pending?.verifier || Date.now() - pending.started > 60*60*1000) {
-          throw Error("请在发送邮件时使用的浏览器重新申请并打开登录链接。");
-        }
-        const auth = await request("/auth/v1/token?grant_type=pkce",{auth_code:result.code,code_verifier:pending.verifier});
-        if (!auth?.access_token) throw Error(message);
-        if (pendingLogin()?.verifier === pending.verifier) localStorage.removeItem(pendingKey);
-        setSession(auth);
-        if (panel.isConnected && panel.closest("dialog[open]")) await dashboard();
-        return;
-      } catch (error) { if (!error.status) message = error.message; }
-      if (panel.isConnected && panel.closest("dialog[open]")) {
-        view("登录未完成",'<p class="help">'+esc(message)+'</p><div class="group-actions">'+
-          button("retry","重新获取登录链接","action")+'</div>',{retry:login});
-      }
     }
 
     async function dashboard() {
@@ -286,7 +233,7 @@
       } else if (session?.access_token) dashboard();
       else login();
     }
-    return {open,finishEmailLogin};
+    return {open};
   }
 
   globalThis.TasterCloud = {
