@@ -148,6 +148,11 @@
       return t+(r.template ? Math.round((rule.min+rule.max)/2) : ["八","七","九"][i])+"分";
     }).join("，");
     const sheetHelp = r.template?.instructions || "核对口述结果，也可点选分数。";
+    const missing = d.voiceNeedsReview ? r.traits.filter(t=>!M.valid(d.scores[t],M.ruleFor(r,t))) : [];
+    const voiceHelp = d.voiceNeedsReview
+      ? '<p id="voice-outcome" role="status">'+esc(missing.length ?
+        "还差 "+missing.join("、")+"。可以只补说这些项，也可以点选分数。" :
+        "有一段口述需要核对。可以补说那一项，或点选分数后保存。")+'</p>' : "";
     const food = r.template?.foodType || "小麦饼干";
     const sampleClass = food.includes("饼干") ? "sample" : "sample sample-generic";
     const header = guest
@@ -158,7 +163,7 @@
       '<section class="hero" aria-label="当前盲评样品与语音录入"><div class="'+sampleClass+'"><span class="sample-tag">'+icon("sample")+'当前样品</span><div class="sample-bottom"><div><small>样品盲码</small><div class="sample-code">'+esc(r.current)+'</div></div><button class="switch" data-action="samples">'+icon("swap")+'切换样品</button></div></div>'+
       '<div class="voice"><div class="voice-head"><h2>'+icon("wave")+'语音评分</h2><button data-action="text">'+icon("keyboard")+'文字录入</button></div><div class="wave-area"><div class="wave" aria-hidden="true">'+wave+'</div><button data-action="mic" class="mic" aria-label="开始语音评分">'+icon("mic")+'</button><div class="wave right" aria-hidden="true">'+wave+'</div></div>'+
       '<p class="voice-instruction">点麦克风口述，停顿后自动填分</p><p class="voice-example">试着说「'+esc(example)+'」</p></div></section>'+
-      '<section class="panel"><div class="sheet-heading"><div><h2 class="section-title">'+icon("clipboard")+'性状评分表</h2><p>'+esc(sheetHelp)+'</p></div><span class="count-tag" id="score-count">已填 '+count+' / '+r.traits.length+'</span></div>'+
+      '<section class="panel"><div class="sheet-heading"><div><h2 class="section-title">'+icon("clipboard")+'性状评分表</h2><p>'+esc(sheetHelp)+'</p>'+voiceHelp+'</div><span class="count-tag" id="score-count">已填 '+count+' / '+r.traits.length+'</span></div>'+
       '<div class="scale-label"><span>品质性状</span><span class="scale-range"><span>评分刻度</span><span>'+(r.template?"按各项量表":"1 低 · 10 高")+'</span></span><span>得分</span></div><div>'+rows+'</div>'+
       ((!guest&&(showNote||d.note))?'<div class="note-box"><label for="note">品鉴备注</label><textarea id="note" maxlength="2000" placeholder="记下样品的口感或香气">'+esc(d.note)+'</textarea></div>':"")+
       '<div class="sheet-footer">'+(!guest?'<button class="subtle" data-action="note">'+icon("note")+'品鉴备注</button>':"")+
@@ -294,7 +299,7 @@
     const firstRule = M.ruleFor(r,r.traits[0]);
     const firstExample = r.traits[0]+(r.template ? Math.round((firstRule.min+firstRule.max)/2) : "八")+"分";
     const audioHelp = guest ? "评分和录音会提交给本场主办人。" : "原声保存在本机。";
-    openModal("口述评分 · "+r.current,'<p class="help">连续报性状和分数，停顿后自动填入，分数齐全即'+(guest?"提交":"保存")+'。'+audioHelp+'浏览器的转写服务可能联网处理声音。</p><label class="field">口述文本<textarea id="speech-text" maxlength="2000" rows="4" placeholder="例如：'+esc(firstExample)+'">'+esc(dialogText)+'</textarea></label><p class="issues" id="speech-feedback" role="status"></p><div class="group-actions"><button class="ghost" id="record-btn" data-action="record">'+icon("mic")+'开始录音</button><button class="action" data-action="parse">填入评分表</button></div>',startMic ? "#record-btn" : "#speech-text");
+    openModal((startMic?"口述评分":"文字录入")+" · "+r.current,'<p class="help">连续报性状和分数，停顿后自动填入，分数齐全即'+(guest?"提交":"保存")+'。'+audioHelp+'浏览器的转写服务可能联网处理声音。</p><label class="field">口述文本<textarea id="speech-text" maxlength="2000" rows="4" placeholder="例如：'+esc(firstExample)+'">'+esc(dialogText)+'</textarea></label><p class="issues" id="speech-feedback" role="status"></p><div class="group-actions"><button class="ghost" id="record-btn" data-action="record">'+icon("mic")+'开始录音</button><button class="action" data-action="parse"'+(startMic?" hidden":"")+'>应用文字评分</button></div>',startMic ? "#record-btn" : "#speech-text");
     if (startMic) startRecording();
   }
   function requestRecordingEnd(session) {
@@ -311,8 +316,9 @@
     const field = $("#speech-text");
     const feedback = $("#speech-feedback");
     const button = $("#record-btn");
+    const parseButton = dialog.querySelector('[data-action="parse"]');
     const r = round();
-    const session = { round: r, code: r.current, rater: r.rater, field, feedback, button, text: "", finalText: "" };
+    const session = { round: r, code: r.current, rater: r.rater, field, feedback, button, parseButton, text: "" };
     const onActivity = () => {
       if (voiceSession !== session || session.ending) return;
       clearTimeout(session.pauseTimer);
@@ -320,13 +326,11 @@
     };
     const rec = TasterVoice.createRecognition({
       onActivity,
-      onResult: (text, finalText) => {
+      onResult: text => {
         if (voiceSession !== session || session.ended) return;
         const nextText = text.slice(0,2000).trim();
-        const nextFinal = finalText.slice(0,2000).trim();
-        if (nextText === session.text && nextFinal === session.finalText) return;
+        if (nextText === session.text) return;
         session.text = nextText;
-        session.finalText = nextFinal;
         if (session.text) field.value = session.text;
         onActivity();
       },
@@ -337,10 +341,16 @@
       },
       onEnd: () => finishRecording(session)
     });
-    if (!rec) { feedback.textContent = "此浏览器未提供语音识别。可使用输入法的语音键口述，或直接输入文字。"; field.focus(); return; }
+    if (!rec) {
+      parseButton.hidden = false;
+      feedback.textContent = "此浏览器未提供语音识别。可使用输入法的语音键口述，或直接输入文字。";
+      field.focus();
+      return;
+    }
     session.recognition = rec;
     voiceSession = session;
     field.readOnly = true;
+    parseButton.hidden = true;
     button.disabled = true;
     feedback.textContent = "正在打开麦克风…";
     try { session.capture = await TasterAudio.record(); }
@@ -362,6 +372,7 @@
       stopRecognition();
       field.readOnly = false;
       button.disabled = false;
+      parseButton.hidden = false;
       feedback.textContent = "麦克风启动失败。请检查麦克风权限，也可以手动输入文字。";
     }
   }
@@ -372,7 +383,7 @@
     clearTimeout(session.pauseTimer);
     clearTimeout(session.limitTimer);
     clearTimeout(session.stopTimer);
-    const { round: r, code, rater, text, finalText, field, button, feedback } = session;
+    const { round: r, code, rater, text, field, button, parseButton, feedback } = session;
     button.disabled = true;
     feedback.textContent = "正在填入评分…";
     let recorded = false;
@@ -399,41 +410,34 @@
     const d = M.draft(r);
     if (recorded) d.hasAudio = true;
     const audioWarning = recorded ? "" : " 本次原声未保存。";
-    const guestVoice = guest?.round === r;
-    if ((!finalText && !(guestVoice && text)) || session.error) {
-      if (text) d.transcript = text;
+    if (!text) {
       persist();
+      parseButton.hidden = false;
       feedback.textContent = (session.error || "未识别到分数，请重说。")+audioWarning;
       return;
     }
-    let parsed = TasterVoice.parse(guestVoice ? text : finalText,r.traits,r.template?.traits,{ autoMatch: true });
-    if (text !== finalText && (!guestVoice || parsed.issues.length || parsed.suggestions?.length ||
-        r.traits.some(trait => !Object.hasOwn(parsed.scores,trait)))) {
-      parsed = TasterVoice.parse(finalText,r.traits,r.template?.traits,{ autoMatch: true });
-      parsed.issues.push("有一段口述未转写完整，请重说这一项。");
-    }
-    Object.assign(d.scores, parsed.scores);
+    const parsed = TasterVoice.parse(text,r.traits,r.template?.traits,{ autoMatch: true });
+    applyRecognizedScores(r,parsed,text,audioWarning);
+  }
+  function applyRecognizedScores(r,parsed,text,audioWarning = "") {
+    const d = M.draft(r);
+    Object.assign(d.scores,parsed.scores);
     const missing = r.traits.filter(trait => !M.valid(d.scores[trait],M.ruleFor(r,trait)));
     const needsReview = parsed.issues.length || parsed.suggestions?.length;
     if (Object.keys(parsed.scores).length && !missing.length && !needsReview) {
       delete d.transcript;
+      delete d.voiceNeedsReview;
       saveCurrentScore(r,audioWarning);
       return;
     }
-    if (!needsReview) {
-      delete d.transcript;
-      persist(); dialog.close(); render();
-      notify("已填分，还差"+missing.join("、")+"。"+audioWarning);
-      return;
-    }
-    d.transcript = text;
+    if (needsReview) d.transcript = text;
+    else delete d.transcript;
+    d.voiceNeedsReview = true;
     persist();
-    feedback.textContent = [
-      Object.keys(parsed.scores).length ? "已填入能匹配的分数。" : "",
-      ...parsed.issues,
-      ...(parsed.suggestions || []).map(item => "「"+item.heard+"」请重说性状名称。"),
-      audioWarning.trim()
-    ].filter(Boolean).join("\n");
+    dialog.close();
+    render();
+    const count = Object.keys(parsed.scores).length;
+    notify((count ? "已自动填入 "+count+" 项评分。" : "这一段未能填写评分。")+audioWarning);
   }
   function askAboutWord(field, suggestion) {
     const {heard,start,end,choices} = suggestion;
@@ -469,22 +473,16 @@
     }
     const r = round(), text = $("#speech-text").value.trim();
     $("#voice-choices")?.remove();
-    const parsed = TasterVoice.parse(text,r.traits,r.template?.traits,{autoMatch:Boolean(guest)});
+    const parsed = TasterVoice.parse(text,r.traits,r.template?.traits,{autoMatch:true});
     if (parsed.suggestions?.length) {
       askAboutWord($("#speech-text"),parsed.suggestions[0]);
       return;
     }
-    if (parsed.issues.length || !Object.keys(parsed.scores).length) {
+    if (!Object.keys(parsed.scores).length) {
       $("#speech-feedback").textContent = parsed.issues.join("\n") || "请说出或输入性状名称和分数。";
       return;
     }
-    const d = M.draft(r);
-    Object.assign(d.scores,parsed.scores);
-    delete d.transcript;
-    const missing = r.traits.filter(t => !M.valid(d.scores[t],M.ruleFor(r,t)));
-    if (guest && !missing.length) { saveCurrentScore(r); return; }
-    persist(); dialog.close(); render();
-    notify(missing.length ? "还差"+missing.join("、")+"，可继续口述或点选。" : "评分已填齐，请核对后确认。");
+    applyRecognizedScores(r,parsed,text);
   }
 
   function saveCurrentScore(r, extra = "") {
@@ -655,7 +653,6 @@
       case "close": dialog.close(); break;
       case "note": showNote=true; render(); $("#note").focus(); break;
       case "confirm": {
-        if (M.draft(r).transcript?.trim()) { voiceEditor(); $("#speech-feedback").textContent="还有待核对的口述文本。请先填入评分表，或清空文本后手动评分。"; break; }
         saveCurrentScore(r);
         break;
       }
