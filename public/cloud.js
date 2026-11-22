@@ -216,14 +216,14 @@
     }
 
     function uploadRound(source) {
-      view("生成场次二维码",'<p class="help">场次名称、模板和盲码将供扫码者查看。后续提交的评分由主办人在此汇总。</p>'+
+      view("生成场次二维码",'<p class="help">扫码者可查看评分规则和样品号。请用表中编号给实物贴签，品种对照由你自己保管。</p>'+
         '<p class="share-purpose">'+esc(source.title)+' · '+source.samples.length+' 份样品</p>'+
         '<div class="group-actions">'+button("back","返回")+button("publish","创建收评场次","action")+'</div>',{
         back:dashboard,
         publish:async (_button,panel)=>{
           const template = TasterTemplates.fromRound(source);
           const id = await rpc("create_v2",{p_title:source.title,p_rubric:template,
-            p_samples:source.samples.map(({code,name})=>({code,name}))},true);
+            p_samples:source.samples.map(({code})=>({code}))},true);
           if (panel.isConnected && panel.closest("dialog[open]")) await showRound(id);
         }
       });
@@ -235,15 +235,15 @@
       if (!result) throw Error("当前账号无法查看该场次。");
       const url = location.origin+location.pathname+"#join="+id;
       const recent = result.records.slice(-20).reverse();
-      const rows = recent.map((record,i)=>'<tr><td>'+esc(record.code)+'</td><td>'+
-        esc(record.rater.slice(0,13))+'</td>'+result.traits.map(trait=>'<td>'+esc(record.scores[trait])+'</td>').join("")+
+      const rows = recent.map((record,i)=>'<tr><td>'+TasterModel.sampleNumber(result,record.code)+'</td>'+
+        result.traits.map(trait=>'<td>'+esc(record.scores[trait])+'</td>').join("")+'<td>'+esc(record.rater.slice(0,13))+'</td>'+
         '<td>'+(record.audioCount ? button("audio-"+i,"试听 "+record.audioCount+" 段","subtle") : "未上传")+'</td></tr>').join("");
       const contents = rows ? '<div class="table-wrap"><table><thead><tr>'+
-        ["盲码","评价员",...result.traits,"录音"].map(name=>'<th>'+esc(name)+'</th>').join("")+
+        ["样品号",...result.traits,"评价员","录音"].map(name=>'<th>'+esc(name)+'</th>').join("")+
         '</tr></thead><tbody>'+rows+'</tbody></table></div>' : "";
       const visibility = {private:"仅自己可见",request:"审核后可用",public:"直接公开使用"};
       const play = Object.fromEntries(recent.flatMap((record,i)=>record.audioCount
-        ? [["audio-"+i,()=>showAudio(id,record)]] : []));
+        ? [["audio-"+i,()=>showAudio(id,record,TasterModel.sampleNumber(result,record.code))]] : []));
       const panel = view("场次二维码与评分",'<div class="share-purpose"><strong>'+esc(result.title)+'</strong><p>'+
         (result.accepting?"收评中":"已暂停")+' · 已收 '+result.records.length+' 条评分</p></div>'+
         '<canvas class="cloud-qr" aria-label="评价员扫码进入场次"></canvas>'+
@@ -252,7 +252,6 @@
         button("toggle",result.accepting?"暂停收评":"恢复收评")+
         button("sharing","模板共享设置")+'</div><p class="help">模板目录 · '+esc(visibility[result.visibility] || visibility.private)+'</p>'+contents+
         (result.records.length>recent.length?'<p class="help">此处显示最近 20 条，下载文件包含全场。</p>':"")+
-        '<label class="checkline"><input type="checkbox" data-reveal>导出时包含样品真实名称</label>'+
         '<div class="group-actions">'+button("back","我的场次")+button("export","导出本场 Excel")+
         button("zip","下载 Excel 和录音 ZIP","action")+'</div>',{
         ...play,
@@ -271,12 +270,13 @@
       drawQR(panel.querySelector("canvas"),url);
     }
 
-    async function showAudio(id,record) {
-      const pending = view("录音 · "+record.code,'<p class="help">正在读取原声…</p>',{});
+    async function showAudio(id,record,number) {
+      const title = "录音 · "+number+" 号";
+      const pending = view(title,'<p class="help">正在读取原声…</p>',{});
       try {
         const clips = await recordingsFor(id,record);
         if (!pending.isConnected || !pending.closest("dialog[open]")) return;
-        const panel = view("录音 · "+record.code,clips.map((_,i)=>'<div class="clip-row"><p>第 '+(i+1)+
+        const panel = view(title,clips.map((_,i)=>'<div class="clip-row"><p>第 '+(i+1)+
           ' 段</p><audio controls preload="metadata"></audio></div>').join("")+
           '<div class="group-actions">'+button("back","返回评分")+'</div>',{back:()=>showRound(id)});
         panel.querySelectorAll("audio").forEach((player,i)=>{
@@ -284,19 +284,18 @@
         });
       } catch (error) {
         if (pending.isConnected && pending.closest("dialog[open]")) {
-          view("录音 · "+record.code,'<p class="help">'+esc(error.message)+'</p>'+button("back","返回评分"),
+          view(title,'<p class="help">'+esc(error.message)+'</p>'+button("back","返回评分"),
             {back:()=>showRound(id)});
         }
       }
     }
 
     async function exportRound(id,panel,includeAudio) {
-      const reveal = panel.querySelector("[data-reveal]").checked;
       const feedback = panel.querySelector(".issues");
       feedback.textContent = "正在整理评分…";
       const result = await rpc("result",{p_round:id},true);
       if (!result?.records.length) throw Error("本场还没有收到评分。");
-      const excel = TasterExport.build({...result,samples:result.samples.map(({code,name})=>({code,name:reveal?name:""}))});
+      const excel = TasterExport.buildScores(result);
       if (!includeAudio) {
         download(new Blob([excel],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}),"小小品鉴家-扫码评分.xlsx");
         feedback.textContent = "Excel 已生成。";
@@ -310,7 +309,7 @@
         feedback.textContent = "正在打包录音 "+(index+1)+" / "+withAudio.length+"…";
         const clips = await recordingsFor(id,record);
         clips.forEach((clip,i)=>{
-          files["录音/"+record.code+"_"+record.rater+"_"+(i+1)+"."+audioTypes[clip.mime]] = audioBytes(clip);
+          files["录音/"+TasterModel.sampleNumber(result,record.code)+"号_"+record.rater+"_"+(i+1)+"."+audioTypes[clip.mime]] = audioBytes(clip);
         });
         count += clips.length;
       }

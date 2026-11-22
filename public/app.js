@@ -29,12 +29,6 @@
   };
   const icon = name => '<svg aria-hidden="true" class="ico" viewBox="0 0 24 24">' + (paths[name] || paths.leaf) + '</svg>';
   document.querySelectorAll("[data-icon]").forEach(el => el.outerHTML = icon(el.dataset.icon));
-  const traitsInfo = {
-    "色泽":["sun","烘焙色泽满意度",0], "裂纹":["crack","表面裂纹明显程度",1], "酥脆度":["crisp","咬碎时的松脆程度",2],
-    "粘牙度":["drop","咀嚼后的粘牙程度",3], "风味":["aroma","香气与滋味满意度",4],
-    "香气":["aroma","闻起来的香气浓淡",4], "甜度":["drop","入口后的甜味强弱",1],
-    "孔隙度":["eye","掰开饼干，看断面上孔洞所占的面积",0], "总体喜好":["user","你有多喜欢这款饼干",2]
-  };
   const storeKey = "little-taster.workspace.v1";
   const blank = () => { const first = M.makeRound(); return { active: first.id, rounds: [first] }; };
   let snapshot, state, storageError = "";
@@ -49,7 +43,7 @@
   let guest, routeId = 0;
   const round = () => guest?.round ?? state.rounds.find(r => r.id === state.active);
   const sharedTemplates = TasterTemplates.presets();
-  let page = "workspace", showNote = false, toastTimer, voiceSession = null;
+  let page = "workspace", readingStatus = "", toastTimer, voiceSession = null;
   let lastFocused = null;
   const audioURLs = [];
   const dialog = $("#dialog");
@@ -103,7 +97,7 @@
     if (!knownPages.includes(next)) next = "workspace";
     stopRecognition();
     if (dialog.open) dialog.close();
-    showNote = false;
+    readingStatus = "";
     page = next;
     if (location.hash.slice(1) !== next) location.hash = next;
     render();
@@ -124,63 +118,52 @@
       (page === "workspace" ? workspace(r) : page === "records" ? recordsPage(r) : page === "sharing" ? sharingPage(r) : communityPage());
     if (page === "sharing") cloud.directory($("#cloud-directory"));
   }
-  function makeWave() {
-    const heights = [3,5,3,8,11,7,13,18,10,8,17,25,14,22,31,18,13,27,40,24,18,35,46,30,19,28,42,34,23,15];
-    return heights.map(h => '<span style="height:'+h+'px"></span>').join("");
-  }
   function workspace(r) {
-    const d = M.draft(r);
-    const count = r.traits.filter(t => M.valid(d.scores[t],M.ruleFor(r,t))).length;
-    const rows = r.traits.map((t,i) => {
-      const [symbol, desc, tone] = traitsInfo[t] || ["leaf","按场次约定评分",i%5];
-      const rule = M.ruleFor(r,t), width = rule.max - rule.min + 1;
-      const description = rule.low && rule.high ? esc(rule.min+" 分 · "+rule.low+" / "+rule.max+" 分 · "+rule.high) : desc;
-      const controls = width>10 ? '<input type="number" step="1" min="'+rule.min+'" max="'+rule.max+'" data-range-trait="'+i+'" aria-label="'+esc(t)+'分数" placeholder="'+rule.min+' 至 '+rule.max+'" value="'+(d.scores[t] ?? "")+'">' :
-        Array.from({length:width},(_,n) => {
-          const score = n+rule.min;
-          return '<button type="button" data-trait="'+i+'" data-value="'+score+'" aria-label="'+esc(t)+' '+score+' 分" aria-pressed="'+(d.scores[t]===score)+'">'+score+'</button>';
-        }).join("");
-      return '<div class="score-row"><div class="row-name"><span class="trait-icon tone'+tone+'">'+icon(symbol)+'</span><span><strong>'+esc(t)+'</strong><small>'+description+'</small>'+(rule.instructions?'<small>'+esc(rule.instructions)+'</small>':'')+'</span></div><div class="numbers" style="--steps:'+(width>10?1:width)+'" role="group" aria-label="'+esc(t)+'">'+controls+'</div><div class="result '+(d.scores[t]!=null?"scored":"")+'">'+(d.scores[t] ?? "—")+'</div></div>';
-    }).join("");
-    const wave = makeWave();
-    const example = r.traits.slice(0,3).map((t,i)=>{
-      const rule = M.ruleFor(r,t);
-      return t+(r.template ? Math.round((rule.min+rule.max)/2) : ["八","七","九"][i])+"分";
-    }).join("，");
-    const sheetHelp = r.template?.instructions || "核对口述结果，也可点选分数。";
-    const missing = d.voiceNeedsReview ? r.traits.filter(t=>!M.valid(d.scores[t],M.ruleFor(r,t))) : [];
-    const voiceHelp = d.voiceNeedsReview
-      ? '<p id="voice-outcome" role="status">'+esc(missing.length ?
-        "还差 "+missing.join("、")+"。可以只补说这些项，也可以点选分数。" :
-        "有一段口述需要核对。可以补说那一项，或点选分数后保存。")+'</p>' : "";
     const food = r.template?.foodType || "小麦饼干";
-    const sampleClass = food.includes("饼干") ? "sample" : "sample sample-generic";
-    const header = guest
-      ? '<p class="guest-status help">'+(r.records.length>=r.samples.length?"本场评分已全部提交。你可以切换样品查看或更新。":"核对实物盲码后口述评分。分数齐全后自动提交给主办人，录音随评分提交。")+'</p>'
-      : '<section class="panel tasting-bar" aria-label="评鉴对象"><div class="tasting-selection"><span class="trait-icon tone3">'+icon("sample")+'</span><div><p>当前评鉴</p><h2>'+esc(food)+'</h2></div></div>'+
-        '<div class="panel-actions"><button class="action" data-action="catalog">'+icon("grid")+'选食品与模板</button><button class="ghost" data-action="organize">'+icon("sliders")+'管理场次</button><button class="ghost" data-action="cloud">扫码收评</button></div></section>';
-    return header+
-      '<section class="hero" aria-label="当前盲评样品与语音录入"><div class="'+sampleClass+'"><span class="sample-tag">'+icon("sample")+'当前样品</span><div class="sample-bottom"><div><small>样品盲码</small><div class="sample-code">'+esc(r.current)+'</div></div><button class="switch" data-action="samples">'+icon("swap")+'切换样品</button></div></div>'+
-      '<div class="voice"><div class="voice-head"><h2>'+icon("wave")+'语音评分</h2><button data-action="text">'+icon("keyboard")+'文字录入</button></div><div class="wave-area"><div class="wave" aria-hidden="true">'+wave+'</div><button data-action="mic" class="mic" aria-label="开始语音评分">'+icon("mic")+'</button><div class="wave right" aria-hidden="true">'+wave+'</div></div>'+
-      '<p class="voice-instruction">点麦克风口述，停顿后自动填分</p><p class="voice-example">试着说「'+esc(example)+'」</p></div></section>'+
-      '<section class="panel"><div class="sheet-heading"><div><h2 class="section-title">'+icon("clipboard")+'性状评分表</h2><p>'+esc(sheetHelp)+'</p>'+voiceHelp+'</div><span class="count-tag" id="score-count">已填 '+count+' / '+r.traits.length+'</span></div>'+
-      '<div class="scale-label"><span>品质性状</span><span class="scale-range"><span>评分刻度</span><span>'+(r.template?"按各项量表":"1 低 · 10 高")+'</span></span><span>得分</span></div><div>'+rows+'</div>'+
-      ((!guest&&(showNote||d.note))?'<div class="note-box"><label for="note">品鉴备注</label><textarea id="note" maxlength="2000" placeholder="记下样品的口感或香气">'+esc(d.note)+'</textarea></div>':"")+
-      '<div class="sheet-footer">'+(!guest?'<button class="subtle" data-action="note">'+icon("note")+'品鉴备注</button>':"")+
-      (d.hasAudio?'<button class="subtle" data-action="voice-audio">'+icon("wave")+'录音</button>':"")+
-      '<button class="action" data-action="confirm">'+icon("check")+(M.findRecord(r)?"更新评价":guest?"提交评分":"确认评分")+'</button></div></section>';
+    const rules = r.traits.map(t=>M.ruleFor(r,t));
+    const example = rules.slice(0,2).map(rule=>rule.name+Math.round((rule.min+rule.max)/2)+"分").join("，");
+    const next = rules[0].name+Math.min(rules[0].max,rules[0].min+2)+"分";
+    const prompt = r.samples.length > 1 ? "如「一号样品，"+example+"。二号样品，"+next+"。」" : "如「一号样品，"+example+"。」";
+    const rows = r.samples.map(({code},i)=>{
+      const scores = M.readScores(r,code);
+      const selected = code === r.current;
+      const completed = Boolean(M.findRecord(r,code));
+      const label = "选择 "+(i+1)+" 号样品"+(completed?"，已保存":"");
+      return '<tr data-score-row="'+(i+1)+'"'+(selected?' class="current-row"':"")+'><th scope="row"><button class="sample-pick" data-sample="'+i+'" aria-label="'+label+'" aria-pressed="'+selected+'">'+(i+1)+'<small>号</small></button></th>'+
+        r.traits.map(t=>'<td'+(Object.hasOwn(scores,t)?' class="has-score"':"")+'>'+esc(scores[t] ?? "—")+'</td>').join("")+'</tr>';
+    }).join("");
+    const help = !guest ? "先给实物贴 1、2、3…号，品种对照由你自己保存。" : "按实物编号口述，完整的评分和录音会自动发送给主办人。";
+    const countLabel = guest ? '<span>'+r.samples.length+' 份样品</span>' :
+      '<button class="count-link" data-action="new-round" aria-label="设置样品数量并新建场次">'+r.samples.length+' 份样品 · 设置</button>';
+    const setup = !guest ? '<div class="panel-actions"><button class="ghost" data-action="catalog">选食品与模板</button><button class="ghost" data-action="organize">管理场次</button><button class="action" data-action="cloud">扫码收评</button></div>' : "";
+    const headings = rules.map(rule=>'<th scope="col">'+esc(rule.name)+'<small>'+esc(rule.min+"–"+rule.max+' 分')+'</small></th>').join("");
+    const guide = '<details class="panel scale-guide"><summary>查看评分说明</summary><p>'+esc(r.template?.instructions || "按各项量表口述分数。")+
+      '</p><dl>'+rules.map(rule=>'<div><dt>'+esc(rule.name)+'</dt><dd>'+esc(rule.min+" 分 "+(rule.low || "程度低")+" · "+rule.max+" 分 "+(rule.high || "程度高"))+
+      (rule.instructions?'<small>'+esc(rule.instructions)+'</small>':"")+'</dd></div>').join("")+'</dl></details>';
+    const hasUnsent = Object.values(r.drafts).some(draft=>draft.syncPending);
+    const current = M.sampleNumber(r,r.current);
+    return '<section class="tasting-lead"><div class="tasting-intro"><div class="tasting-label"><span>'+esc(food)+'</span>'+countLabel+'</div>'+
+      '<h2>按样品号口述评分</h2><p class="voice-sample-prompt">'+esc(prompt)+'</p>'+
+      '<div class="tasting-action"><button class="action mic-start" data-action="mic">'+icon("mic")+'开始口述</button>'+
+      '<span>不报样品号时填入当前 <b id="current-sample">'+current+'</b> 号</span></div><p class="tasting-help">'+help+'</p>'+setup+
+      '</div><div class="tasting-photo" aria-hidden="true"></div></section>'+
+      '<section class="panel score-matrix"><div class="sheet-heading"><h2 class="section-title">样品评分表</h2>'+
+      (guest && hasUnsent?'<button class="ghost" data-action="retry-scores">重试提交</button>':"")+'</div>'+
+      (readingStatus?'<p id="voice-outcome" class="reading-status" role="status">'+esc(readingStatus)+'</p>':"")+
+      '<div class="matrix-scroll" tabindex="0" aria-label="样品评分表，可横向滚动"><table><thead><tr><th scope="col">样品号</th>'+headings+
+      '</tr></thead><tbody>'+rows+'</tbody></table></div></section>'+guide;
   }
   function recordsPage(r) {
     const historical = M.usesPreviousBiscuitTraits(r);
     const header = '<div class="sheet-heading"><h2 class="section-title">'+icon("list")+'已确认的评价</h2><span class="count-tag">'+r.records.length+' 条记录</span></div>'+roundPicker(r,"records-select");
     if (!r.records.length) return '<section class="panel">'+header+'<div class="empty">'+icon("clipboard")+'<h3>还没有已确认的评价</h3><p>录入第一份样品评分后，即可在这里查看和导出。</p><button class="action" data-action="home">去评价</button></div></section>';
-    const columns = ["盲码","评价员",...r.traits,"备注"];
+    const columns = ["样品号",...r.traits,"评价员"];
     const hasOperations = !historical || r.records.some(record => record.hasAudio);
     if (hasOperations) columns.push("操作");
     const rows = r.records.map((x,i) => {
       const edit = historical ? "" : '<button class="subtle" data-edit="'+i+'">'+icon("note")+'修改</button>';
       const audio = x.hasAudio ? '<button class="subtle" data-audio="'+i+'">'+icon("wave")+'录音</button>' : "";
-      return '<tr><td><b>'+esc(x.code)+'</b></td><td>'+esc(x.rater)+'</td>'+r.traits.map(t=>'<td>'+esc(x.scores[t])+'</td>').join("")+'<td>'+esc(x.note || "—")+'</td>'+
+      return '<tr><td><b>'+M.sampleNumber(r,x.code)+'</b></td>'+r.traits.map(t=>'<td>'+esc(x.scores[t])+'</td>').join("")+'<td>'+esc(x.rater)+'</td>'+
         (hasOperations?'<td>'+audio+edit+'</td>':"")+'</tr>';
     }).reverse().join("");
     return '<section class="panel">'+header+'<div class="table-wrap"><table><thead><tr>'+columns.map(t=>'<th>'+esc(t)+'</th>').join("")+'</tr></thead><tbody>'+rows+'</tbody></table></div></section>';
@@ -191,7 +174,7 @@
   }
   function organizeRound(r) {
     openModal("管理场次",roundPicker(r,"round-select")+
-      '<form id="rater-form"><label class="field">更换评价员<input name="rater" value="'+esc(r.rater)+'" maxlength="40" required></label><div class="panel-actions"><button class="ghost">保存评价员</button><button type="button" class="ghost" data-action="mapping">'+icon("eye")+'盲码对照表</button><button type="button" class="ghost" data-action="local-records">本机评分与录音</button></div></form>');
+      '<form id="rater-form"><label class="field">更换评价员<input name="rater" value="'+esc(r.rater)+'" maxlength="40" required></label><div class="panel-actions"><button class="ghost">保存评价员</button><button type="button" class="ghost" data-action="new-round">新建场次 · 设置样品数</button><button type="button" class="ghost" data-action="local-records">本机评分与录音</button></div></form>');
   }
   function localTemplates() {
     return state.savedTemplates || [];
@@ -259,7 +242,8 @@
   }
 
   async function showVoiceAudio(r, code, rater) {
-    openModal("录音 · "+code, '<div id="voice-clips"><p class="help" role="status">正在读取本机录音…</p></div>');
+    const sample = M.sampleNumber(r,code)+" 号";
+    openModal("录音 · "+sample, '<div id="voice-clips"><p class="help" role="status">正在读取本机录音…</p></div>');
     const panel = $("#voice-clips");
     try {
       const clips = await TasterAudio.list({ roundId: r.id, code, rater });
@@ -280,7 +264,7 @@
         const extension = blob.type.includes("mp4") ? "m4a" : blob.type.includes("ogg") ? "ogg" :
           blob.type.includes("wav") ? "wav" : "webm";
         link.href = url;
-        link.download = code+"-录音-"+(index+1)+"."+extension;
+        link.download = sample+"-录音-"+(index+1)+"."+extension;
         link.textContent = "下载录音 "+(index+1);
         row.append(player, link);
         panel.append(row);
@@ -289,91 +273,67 @@
       if (panel.isConnected) panel.textContent = "本机录音暂时无法读取。";
     }
   }
-  function openSamples() {
+  function voiceEditor() {
+    if (guest?.pending) return;
     const r = round();
-    openModal("切换样品",'<p class="help">选择与你手中样品标签一致的盲码。</p><div class="sample-grid">'+r.samples.map((s,i)=>'<button data-sample="'+i+'" aria-pressed="'+(r.current===s.code)+'">'+esc(s.code)+'<small>'+(M.findRecord(r,s.code)?"已评价":"待评价")+'</small></button>').join("")+'</div>');
+    openModal("口述评分",'<p class="help">报样品号，再报性状和分数。可以接着报下一个样品，停顿后自动填入。</p>'+
+      '<p class="help">'+(guest?"录音会随完整评分发送给主办人。":"原声保存在本机。")+'浏览器的语音服务可能联网处理声音。</p>'+
+      '<p id="speech-feedback" class="recording-status" role="status">正在打开麦克风…</p>'+
+      '<div class="group-actions"><button class="ghost" id="record-btn" data-action="stop-recording" disabled>'+icon("stop")+'结束录音</button></div>',"#record-btn");
+    startRecording(r);
   }
-  function voiceEditor(startMic = false) {
-    const r = round();
-    const dialogText = M.draft(r).transcript || "";
-    const firstRule = M.ruleFor(r,r.traits[0]);
-    const firstExample = r.traits[0]+(r.template ? Math.round((firstRule.min+firstRule.max)/2) : "八")+"分";
-    const audioHelp = guest ? "评分和录音会提交给本场主办人。" : "原声保存在本机。";
-    openModal((startMic?"口述评分":"文字录入")+" · "+r.current,'<p class="help">连续报性状和分数，停顿后自动填入，分数齐全即'+(guest?"提交":"保存")+'。'+audioHelp+'浏览器的转写服务可能联网处理声音。</p><label class="field">口述文本<textarea id="speech-text" maxlength="2000" rows="4" placeholder="例如：'+esc(firstExample)+'">'+esc(dialogText)+'</textarea></label><p class="issues" id="speech-feedback" role="status"></p><div class="group-actions"><button class="ghost" id="record-btn" data-action="record">'+icon("mic")+'开始录音</button><button class="action" data-action="parse"'+(startMic?" hidden":"")+'>应用文字评分</button></div>',startMic ? "#record-btn" : "#speech-text");
-    if (startMic) startRecording();
-  }
+
   function requestRecordingEnd(session) {
-    if (voiceSession !== session || !session.started || session.ending) return;
+    if (!session || voiceSession !== session || !session.started || session.ending) return;
     session.ending = true;
     try { session.recognition.stop(); }
     catch { finishRecording(session); return; }
-    if (!session.ended) session.stopTimer = setTimeout(() => finishRecording(session), 2500);
+    if (!session.ended) session.stopTimer = setTimeout(()=>finishRecording(session),2500);
   }
 
-  async function startRecording() {
-    if (voiceSession) { requestRecordingEnd(voiceSession); return; }
-    $("#voice-choices")?.remove();
-    const field = $("#speech-text");
+  async function startRecording(r) {
     const feedback = $("#speech-feedback");
     const button = $("#record-btn");
-    const parseButton = dialog.querySelector('[data-action="parse"]');
-    const r = round();
-    const session = { round: r, code: r.current, rater: r.rater, field, feedback, button, parseButton, text: "" };
+    const session = {round:r,guest,code:r.current,feedback,button,text:""};
     const onActivity = () => {
       if (voiceSession !== session || session.ending) return;
       clearTimeout(session.pauseTimer);
-      session.pauseTimer = setTimeout(() => requestRecordingEnd(session), 3000);
+      session.pauseTimer = setTimeout(()=>requestRecordingEnd(session),3000);
     };
     const rec = TasterVoice.createRecognition({
       onActivity,
       onResult: text => {
         if (voiceSession !== session || session.ended) return;
-        const nextText = text.slice(0,2000).trim();
-        if (nextText === session.text) return;
-        session.text = nextText;
-        if (session.text) field.value = session.text;
+        const next = text.slice(0,8000).trim();
+        if (!next || next === session.text) return;
+        session.text = next;
         onActivity();
       },
       onError: message => {
         if (voiceSession !== session) return;
         session.error = message;
-        feedback.textContent = message;
+        requestRecordingEnd(session);
       },
-      onEnd: () => finishRecording(session)
+      onEnd: ()=>finishRecording(session)
     });
-    if (!rec) {
-      parseButton.hidden = false;
-      feedback.textContent = "此浏览器未提供语音识别。可使用输入法的语音键口述，或直接输入文字。";
-      field.focus();
-      return;
-    }
+    if (!rec) { feedback.textContent = "此浏览器未提供语音识别。请用支持语音识别的浏览器打开。"; return; }
     session.recognition = rec;
     voiceSession = session;
-    field.readOnly = true;
-    parseButton.hidden = true;
-    button.disabled = true;
-    feedback.textContent = "正在打开麦克风…";
     try { session.capture = await TasterAudio.record(); }
-    catch { session.audioWarning = "本次原声无法保存。"; }
+    catch { session.audioWarning = "原声无法录制。"; }
     if (voiceSession !== session) { session.capture?.finish(); return; }
     try {
       session.started = true;
       if (session.capture?.track) {
         try { rec.start(session.capture.track); }
         catch { rec.start(); }
-      } else {
-        rec.start();
-      }
-      session.limitTimer = setTimeout(() => requestRecordingEnd(session), 90000);
+      } else rec.start();
+      session.limitTimer = setTimeout(()=>requestRecordingEnd(session),90000);
       button.disabled = false;
-      button.innerHTML = icon("stop")+"结束录音";
-      feedback.textContent = "正在聆听，停顿后自动填分…"+(session.audioWarning || "");
+      feedback.textContent = "正在听，停顿后自动填表。"+(session.audioWarning || "");
     } catch {
       stopRecognition();
-      field.readOnly = false;
-      button.disabled = false;
-      parseButton.hidden = false;
-      feedback.textContent = "麦克风启动失败。请检查麦克风权限，也可以手动输入文字。";
+      feedback.textContent = "麦克风启动失败。请检查浏览器的麦克风权限。";
     }
   }
 
@@ -383,155 +343,106 @@
     clearTimeout(session.pauseTimer);
     clearTimeout(session.limitTimer);
     clearTimeout(session.stopTimer);
-    const { round: r, code, rater, text, field, button, parseButton, feedback } = session;
+    const {round:r,text,feedback,button} = session;
     button.disabled = true;
-    feedback.textContent = "正在填入评分…";
-    let recorded = false;
-    try {
-      const blob = await session.capture?.finish();
-      if (voiceSession !== session) return;
-      if (blob?.size) {
-        const sample = { roundId: r.id, code, rater };
-        try { await TasterAudio.save(sample, blob); }
-        catch (error) {
-          if (guest?.round !== r) throw error;
-          const clips = guest.unsavedAudio.get(code) || [];
-          clips.push({id:crypto.randomUUID(),at:Date.now(),blob});
-          guest.unsavedAudio.set(code,clips);
-        }
-        recorded = true;
-      }
-    } catch {}
+    feedback.textContent = "正在填表…";
+    const blob = await session.capture?.finish().catch(()=>null);
     if (voiceSession !== session) return;
-    voiceSession = null;
-    field.readOnly = false;
-    button.disabled = false;
-    button.innerHTML = icon("mic")+"继续录音";
-    const d = M.draft(r);
-    if (recorded) d.hasAudio = true;
-    const audioWarning = recorded ? "" : " 本次原声未保存。";
     if (!text) {
-      persist();
-      parseButton.hidden = false;
-      feedback.textContent = (session.error || "未识别到分数，请重说。")+audioWarning;
+      voiceSession = null;
+      feedback.textContent = session.error || "没有听到评分，请关掉窗口后再试一次。";
       return;
     }
-    const parsed = TasterVoice.parse(text,r.traits,r.template?.traits,{ autoMatch: true });
-    applyRecognizedScores(r,parsed,text,audioWarning);
-  }
-  function applyRecognizedScores(r,parsed,text,audioWarning = "") {
-    const d = M.draft(r);
-    Object.assign(d.scores,parsed.scores);
-    const missing = r.traits.filter(trait => !M.valid(d.scores[trait],M.ruleFor(r,trait)));
-    const needsReview = parsed.issues.length || parsed.suggestions?.length;
-    if (Object.keys(parsed.scores).length && !missing.length && !needsReview) {
-      delete d.transcript;
-      delete d.voiceNeedsReview;
-      saveCurrentScore(r,audioWarning);
-      return;
+    const parsed = TasterVoice.parseSamples(text,r.samples,session.code,r.traits,r.template?.traits);
+    const complete = [];
+    const partial = [];
+    let written = 0;
+    let audioLost = false;
+    for (const row of parsed.rows) {
+      const n = M.sampleNumber(r,row.code);
+      const draft = M.draft(r,row.code);
+      const count = Object.keys(row.scores).length;
+      if (count && blob?.size) {
+        try {
+          await TasterAudio.save({roundId:r.id,code:row.code,rater:r.rater},blob);
+          draft.hasAudio = true;
+        } catch {
+          if (session.guest) {
+            const memory = session.guest.unsavedAudio;
+            const clips = memory.get(row.code) || [];
+            clips.push({id:crypto.randomUUID(),at:Date.now(),blob});
+            memory.set(row.code,clips);
+          } else audioLost = true;
+        }
+      }
+      if (voiceSession !== session) return;
+      Object.assign(draft.scores,row.scores);
+      delete draft.transcript;
+      delete draft.voiceNeedsReview;
+      written += count;
+      const missing = r.traits.filter(t=>!M.valid(draft.scores[t],M.ruleFor(r,t)));
+      if (count && !missing.length && !row.issues.length && !row.suggestions?.length) {
+        if (session.guest) draft.syncPending = true;
+        complete.push(row.code);
+      } else {
+        delete draft.syncPending;
+        if (missing.length) partial.push(n+" 号还差 "+missing.join("、"));
+        if (row.issues.length || row.suggestions?.length) {
+          const issue = row.issues[0]?.replace(/请确认$/u,"请重说这一项。");
+          partial.push(n+" 号 "+(issue || "有一项名称听不清，请重说。"));
+        }
+      }
     }
-    if (needsReview) d.transcript = text;
-    else delete d.transcript;
-    d.voiceNeedsReview = true;
+    voiceSession = null;
+    if (!session.guest) for (const code of complete) M.confirmScore(r,code);
+    const incomplete = parsed.rows.find(row=>!complete.includes(row.code));
+    if (incomplete) r.current = incomplete.code;
+    const message = written ? "已填入 "+written+" 个分数。" : "这次没有识别到可填写的分数。";
+    const note = written && (!blob?.size || audioLost) ? "本次有录音未保存。" : "";
+    readingStatus = [message,...parsed.issues,...partial,note].filter(Boolean).join(" ");
     persist();
     dialog.close();
     render();
-    const count = Object.keys(parsed.scores).length;
-    notify((count ? "已自动填入 "+count+" 项评分。" : "这一段未能填写评分。")+audioWarning);
-  }
-  function askAboutWord(field, suggestion) {
-    const {heard,start,end,choices} = suggestion;
-    // The parser indexes the NFKC-normalized transcript. Keep the editable
-    // source intact until the taster actually selects a column.
-    const source = field.value.normalize("NFKC").trim();
-    const group = document.createElement("div");
-    group.id = "voice-choices";
-    group.className = "settings-actions";
-    group.setAttribute("role","group");
-    group.setAttribute("aria-label","确认口述性状");
-    for (const trait of choices) {
-      const b = document.createElement("button");
-      b.type = "button"; b.className = "ghost"; b.dataset.voiceChoice = trait;
-      b.textContent = "按「"+trait+"」填写";
-      b.addEventListener("click",()=>{
-        if (voiceSession || source !== field.value.normalize("NFKC").trim()) { group.remove(); return; }
-        field.value = source.slice(0,start)+trait+source.slice(end);
-        M.draft(round()).transcript = field.value;
-        persist();
-        applyTranscript();
-      });
-      group.append(b);
-    }
-    const feedback = $("#speech-feedback");
-    feedback.textContent = "听到的是「"+heard+"」。请选择你指的性状，或直接修改上面的文字。";
-    feedback.after(group);
-  }
-  function applyTranscript() {
-    if (voiceSession) {
-      requestRecordingEnd(voiceSession);
-      return;
-    }
-    const r = round(), text = $("#speech-text").value.trim();
-    $("#voice-choices")?.remove();
-    const parsed = TasterVoice.parse(text,r.traits,r.template?.traits,{autoMatch:true});
-    if (parsed.suggestions?.length) {
-      askAboutWord($("#speech-text"),parsed.suggestions[0]);
-      return;
-    }
-    if (!Object.keys(parsed.scores).length) {
-      $("#speech-feedback").textContent = parsed.issues.join("\n") || "请说出或输入性状名称和分数。";
-      return;
-    }
-    applyRecognizedScores(r,parsed,text);
+    if (session.guest && complete.length) await submitGuestScores(session.guest,complete);
   }
 
-  function saveCurrentScore(r, extra = "") {
-    if (guest?.round === r) { submitGuestScore(guest,extra); return; }
-    try {
-      const { record, done } = M.confirmScore(r);
-      showNote = false;
-      const saved = persist();
-      if (dialog.open) dialog.close();
-      render();
-      notify(record.code+" 已保存"+(done?"，本轮品鉴完成。":"，下一份是 "+r.current+"。")+
-        extra+(saved?"":" 请及时导出。"));
-    } catch (error) {
-      notify(error.message);
-    }
-  }
-  async function submitGuestScore(entry, extra) {
+  async function submitGuestScores(entry,codes) {
     if (entry.pending) return;
     const {round:r,evaluator} = entry;
-    let scores;
-    try { scores = M.checkedDraft(r).scores; }
-    catch (error) { notify(error.message); return; }
-    const main = $("#main");
     entry.pending = true;
-    persist();
-    if (dialog.open) dialog.close();
+    const main = $("#main");
     main.inert = true;
     main.setAttribute("aria-busy","true");
-    notify("正在提交评分…");
+    const failures = [];
+    const notices = [];
+    let submitted = 0;
     try {
-      const local = await TasterAudio.list({roundId:r.id,code:r.current,rater:r.rater}).catch(()=>[]);
-      const memory = entry.unsavedAudio.get(r.current) || [];
-      const warning = await TasterCloud.submit(r.id,evaluator,r.current,scores,[...local,...memory]);
-      if (guest !== entry) return;
-      entry.unsavedAudio.delete(r.current);
-      const {record,done} = M.confirmScore(r);
-      persist();
-      render();
-      notify(record.code+" 已提交"+(done?"，本场评分完成。":"，下一份是 "+r.current+"。")+(warning || extra));
-    } catch (error) {
-      if (guest === entry) {
-        render();
-        notify(error.message+" 草稿已保留，可重试。");
+      for (const code of codes) {
+        if (guest !== entry) return;
+        const draft = M.draft(r,code);
+        if (!draft.syncPending) continue;
+        try {
+          const scores = M.checkedDraft(r,code).scores;
+          const local = await TasterAudio.list({roundId:r.id,code,rater:r.rater}).catch(()=>[]);
+          const clips = [...local,...(entry.unsavedAudio.get(code) || [])];
+          const warning = await TasterCloud.submit(r.id,evaluator,code,scores,clips);
+          if (guest !== entry) return;
+          if (warning) notices.push(warning);
+          entry.unsavedAudio.delete(code);
+          M.confirmScore(r,code);
+          persist();
+          submitted++;
+        } catch (error) { failures.push(M.sampleNumber(r,code)+" 号 "+error.message); }
       }
     } finally {
       entry.pending = false;
       if (guest === entry) {
         main.inert = false;
         main.removeAttribute("aria-busy");
+        if (submitted) readingStatus += " 已提交 "+submitted+" 份样品。";
+        if (failures.length) readingStatus += " "+failures.join(" ")+"，分数已保留，可重试提交。";
+        if (notices.length) readingStatus += " "+[...new Set(notices)].join(" ");
+        render();
       }
     }
   }
@@ -560,47 +471,51 @@
       template.traits.map(rule=>esc(rule.name)+' '+rule.min+'–'+rule.max).join('、')+'</p></div>';
     openModal("新建品鉴场次",'<form id="new-form">'+ruleField+
       '<label class="field">场次名称<input name="title" value="'+esc(formDraft.title ?? (template.foodType+'品鉴').slice(0,60))+'" maxlength="60" required></label>'+
-      '<label class="field">样品名称<textarea name="names" rows="4" required maxlength="10000" placeholder="每行填写一个样品">'+esc(formDraft.names || '')+'</textarea><small>可填写 1–200 个样品。创建后会随机分配盲码。</small></label>'+
+      '<label class="field">样品数量<input name="count" type="number" inputmode="numeric" min="1" max="200" step="1" required value="'+esc(formDraft.count ?? 5)+'"><small>可设 1–200 份。按表中的顺序给实物贴号。</small></label>'+
       '<p id="form-feedback" class="issues" role="status"></p><div class="group-actions"><button type="button" class="ghost" data-action="edit-form-template">修改模板副本</button><button class="action">创建场次</button></div></form>',"input");
     $("#new-form").tastingTemplate = template;
   }
   function createRound(form) {
     const data = new FormData(form), title = data.get("title").trim();
-    const names = data.get("names").split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
+    const count = Number(data.get("count"));
     const template = form.tastingTemplate;
-    if (!title || !names.length || names.length>200 || names.some(x=>x.length>80)) {
-      $("#form-feedback").textContent = "请填写场次名称和 1–200 行样品名称，每行最多 80 字。"; return;
+    if (!title || !Number.isInteger(count) || count<1 || count>200) {
+      $("#form-feedback").textContent = "请填写场次名称，样品数量为 1–200 之间的整数。"; return;
     }
-    const r = M.makeRound({ title, names, template, rater:round().rater });
+    const r = M.makeRound({ title, names:Array(count).fill(""), template, rater:round().rater });
     state.rounds.push(r); state.active = r.id;
-    persist(); navigate("workspace"); notify("场次已创建。可到「管理场次」查看盲码对照表。");
+    persist(); navigate("workspace"); notify("已创建 "+count+" 份样品的评分表。");
   }
-  function showMapping() {
-    const r = round();
-    openModal("组织者盲码对照表",'<p class="help">请按此表为实体样品贴签，完成后关闭对照表再交给评价员。</p><div class="table-wrap"><table><thead><tr><th>样品盲码</th><th>样品名称</th></tr></thead><tbody>'+r.samples.map((s,i)=>'<tr><td>'+esc(s.code)+'</td><td><input aria-label="'+esc(s.code)+' 对应样品" data-mapping="'+i+'" maxlength="80" value="'+esc(s.name)+'" placeholder="填写样品名称"></td></tr>').join("")+'</tbody></table></div><div class="group-actions"><button class="action" data-action="save-map">保存对照表</button></div>');
+  function localScores(r) {
+    const records = new Map(r.records.map(record=>[JSON.stringify([record.code,record.rater]),record]));
+    for (const [id,draft] of Object.entries(r.drafts)) {
+      if (!Object.keys(draft.scores).length) continue;
+      const [code,rater] = JSON.parse(id);
+      records.set(id,{code,rater,scores:draft.scores});
+    }
+    return [...records.values()];
   }
   function exportOptions() {
     const r = round();
-    if (!r.records.length) { openModal("导出 Excel",'<p class="help">当前场次还没有已确认的评分。完成一份样品并确认后，即可导出评价记录。</p><div class="group-actions"><button class="action" data-action="home">返回工作台</button></div>'); return; }
-    openModal("导出本机评分",'<p class="help">将「'+esc(r.title)+'」的 '+r.records.length+' 条已确认评价导出为 Excel，也可连同本机保存的录音一起打包。</p><label class="checkline"><input type="checkbox" id="export-names">包含样品真实名称（揭盲）</label><div class="group-actions"><button class="ghost" data-action="download">'+icon("download")+'只下载 Excel</button><button class="action" data-action="download-archive">下载 Excel 和录音 ZIP</button></div>');
+    openModal("导出本机评分",'<p class="help">将「'+esc(r.title)+'」按样品号和性状导出。未填写的分数会留空。</p><div class="group-actions"><button class="ghost" data-action="download">'+icon("download")+'只下载 Excel</button><button class="action" data-action="download-archive">下载 Excel 和录音 ZIP</button></div>');
   }
   async function download(button,includeAudio = false) {
-    const r = round(), withNames = $("#export-names").checked;
+    const r = round(), records = localScores(r);
     if ($("#dialog-inner [aria-busy='true']")) return;
     button.setAttribute("aria-busy","true");
     try {
-      const excel = TasterExport.build({...r,samples:r.samples.map(s=>({...s,name:withNames?s.name:""}))});
+      const excel = TasterExport.buildScores({...r,records});
       const title = r.title.replace(/[<>:"/\\|?*\u0000-\u001f]/g,"_");
       let blob = new Blob([excel],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
       if (includeAudio) {
         const files = {"评分.xlsx":excel};
-        for (const [index,record] of r.records.entries()) {
+        for (const [index,record] of records.entries()) {
           if (!button.isConnected || !dialog.open) return;
           const clips = await TasterAudio.list({roundId:r.id,code:record.code,rater:record.rater});
           for (const [i,clip] of clips.entries()) {
             const type = clip.blob.type;
             const ext = type.includes("mp4") ? "m4a" : type.includes("ogg") ? "ogg" : type.includes("wav") ? "wav" : "webm";
-            files["录音/"+record.code+"_记录"+(index+1)+"_"+(i+1)+"."+ext] = new Uint8Array(await clip.blob.arrayBuffer());
+            files["录音/"+M.sampleNumber(r,record.code)+"号_记录"+(index+1)+"_"+(i+1)+"."+ext] = new Uint8Array(await clip.blob.arrayBuffer());
           }
         }
         blob = new Blob([TasterExport.writeZip(files)],{type:"application/zip"});
@@ -608,7 +523,7 @@
       if (!button.isConnected || !dialog.open) return;
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a"); a.href = url;
-      a.download = title+"_"+(withNames?"揭盲":"盲评")+"_"+new Date().toISOString().slice(0,10)+(includeAudio?".zip":".xlsx");
+      a.download = title+"_"+new Date().toISOString().slice(0,10)+(includeAudio?".zip":".xlsx");
       document.body.append(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(url),60000);
       dialog.close(); notify(includeAudio?"已打包本机评分和可用录音。":"已生成 Excel 文件。");
     } catch (err) { notify("导出失败："+err.message); }
@@ -624,14 +539,15 @@
       return;
     }
     const r = round();
-    if ("trait" in b.dataset) {
-      const t = r.traits[Number(b.dataset.trait)];
-      M.draft(r).scores[t] = Number(b.dataset.value); persist(); render();
-      document.querySelector('[data-trait="'+b.dataset.trait+'"][data-value="'+b.dataset.value+'"]')?.focus({preventScroll:true});
-      return;
-    }
     if ("sample" in b.dataset) {
-      r.current = r.samples[Number(b.dataset.sample)].code; showNote = false; persist(); dialog.close(); render(); return;
+      r.current = r.samples[Number(b.dataset.sample)].code;
+      persist();
+      document.querySelector(".current-row")?.classList.remove("current-row");
+      document.querySelector('.sample-pick[aria-pressed="true"]')?.setAttribute("aria-pressed","false");
+      b.closest("tr").classList.add("current-row");
+      b.setAttribute("aria-pressed","true");
+      $("#current-sample").textContent = Number(b.dataset.sample)+1;
+      return;
     }
     if ("edit" in b.dataset) {
       const rec = r.records[Number(b.dataset.edit)]; r.current = rec.code; r.rater = rec.rater; persist(); navigate("workspace"); return;
@@ -644,21 +560,16 @@
     if (b.id==="export") { exportOptions(); return; }
     switch (b.dataset.action) {
       case "home": navigate("workspace"); break;
-      case "samples": openSamples(); break;
-      case "text": voiceEditor(); break;
-      case "mic": voiceEditor(true); break;
-      case "voice-audio": showVoiceAudio(r,r.current,r.rater); break;
-      case "record": startRecording(); break;
-      case "parse": applyTranscript(); break;
-      case "close": dialog.close(); break;
-      case "note": showNote=true; render(); $("#note").focus(); break;
-      case "confirm": {
-        saveCurrentScore(r);
+      case "mic": voiceEditor(); break;
+      case "stop-recording": requestRecordingEnd(voiceSession); break;
+      case "retry-scores":
+        if (guest) submitGuestScores(guest,r.samples.filter(({code})=>M.draft(r,code).syncPending).map(({code})=>code));
         break;
-      }
+      case "close": dialog.close(); break;
       case "catalog": openCatalog(); break;
       case "cloud": cloud.open(); break;
       case "organize": organizeRound(r); break;
+      case "new-round": newRoundForm(TasterTemplates.fromRound(r),{count:r.samples.length}); break;
       case "local-records": navigate("records"); break;
       case "shared-directory": navigate("sharing"); break;
       case "blank-template": templateEditor({ mode:"edit" }); break;
@@ -670,11 +581,10 @@
         templateEditor({ initial:form.tastingTemplate, mode:"edit", formDraft:Object.fromEntries(new FormData(form)) });
         break;
       }
-      case "share-data": sharing.ownerRound(r); break;
-      case "mapping": showMapping(); break;
-      case "save-map":
-        dialog.querySelectorAll("[data-mapping]").forEach(input=>r.samples[Number(input.dataset.mapping)].name=input.value.trim());
-        persist(); dialog.close(); notify("对照表已更新。"); break;
+      case "share-data":
+        sharing.ownerRound({...r,samples:r.samples.map(({code})=>({code})),
+          records:r.records.map(({code,rater,scores,at})=>({code,rater,scores,at}))});
+        break;
       case "download": download(b); break;
       case "download-archive": download(b,true); break;
     }
@@ -686,26 +596,16 @@
       const name=new FormData(event.target).get("rater").trim();
       if(!name){notify("请输入评价员姓名或代号。"); return;}
       const r=round(); r.rater=name; r.current=r.samples.find(s=>!M.findRecord(r,s.code))?.code || r.samples[0].code;
+      readingStatus = "";
       persist(); dialog.close(); render(); notify("已切换至"+name+"。");
     }
   });
   document.addEventListener("input",event=>{
     if (event.target.hasAttribute("data-template-search")) filterTemplates(event.target);
-    if(event.target.hasAttribute("data-range-trait")) {
-      const r=round(), input=event.target, t=r.traits[Number(input.dataset.rangeTrait)];
-      const value=input.valueAsNumber, draft=M.draft(r);
-      if(M.valid(value,M.ruleFor(r,t))) draft.scores[t]=value; else delete draft.scores[t];
-      const result=input.closest(".score-row").querySelector(".result");
-      result.textContent=draft.scores[t] ?? "—"; result.classList.toggle("scored",draft.scores[t]!=null);
-      $("#score-count").textContent="已填 "+r.traits.filter(k=>M.valid(draft.scores[k],M.ruleFor(r,k))).length+" / "+r.traits.length;
-      persist();
-    }
-    if(event.target.id==="note") { M.draft(round()).note=event.target.value; persist(); }
-    if(event.target.id==="speech-text"){ $("#voice-choices")?.remove(); $("#speech-feedback").textContent=""; M.draft(round()).transcript=event.target.value; persist(); }
   });
   document.addEventListener("change",event=>{
     if (event.target.hasAttribute("data-round-picker")) {
-      state.active=event.target.value; showNote=false; persist();
+      state.active=event.target.value; readingStatus=""; persist();
       if (dialog.open) dialog.close();
       if (page === "workspace" && M.usesPreviousBiscuitTraits(round())) navigate("records"); else render();
     }
@@ -746,7 +646,7 @@
     if (guest || document.body.classList.contains("cloud-guest")) {
       stopRecognition();
       if (dialog.open) dialog.close();
-      showNote = false;
+      readingStatus = "";
       guest = null;
       $("#main").inert = false;
       $("#main").removeAttribute("aria-busy");

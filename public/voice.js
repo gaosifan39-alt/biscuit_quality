@@ -279,6 +279,41 @@
     'language-not-supported': '当前语音服务未提供中文识别，可以使用中文输入法语音。',
   };
 
+  function parseSamples(text, samples, current, traits, rules) {
+    const transcript = normalize(text || "");
+    const numerals = "[0-9零〇一二两兩三四五六七八九十百千]+";
+    const references = new RegExp(
+      `样品(?:编号|編號)?\\s*[：:]?\\s*(?<after>${numerals})\\s*(?:号|號)?|`+
+      `(?:第\\s*)?(?<before>${numerals})\\s*(?:(?:号|號)(?:\\s*样品)?|个\\s*样品)|`+
+      `(?<code>[Bb]\\s*-\\s*[0-9]+)`, "gu");
+    const headers = [...transcript.matchAll(references)];
+    const fragments = new Map();
+    const issues = [];
+    if (!headers.length && current) fragments.set(current,[transcript]);
+    if (headers.length && Object.keys(parse(transcript.slice(0,headers[0].index),traits,rules).scores).length) {
+      issues.push("开头有分数没带样品号，请补报样品号。");
+    }
+    headers.forEach((header,i)=>{
+      const {after,before,code} = header.groups;
+      const digitsOnly = after ?? before ?? "";
+      const normalized = /^[零〇][零〇一二三四五六七八九]+$/u.test(digitsOnly)
+        ? digitsOnly.replace(/[零〇一二三四五六七八九]/gu,c=>String(c==="〇"?0:digits.indexOf(c)))
+        : digitsOnly;
+      const sample = code ? samples.find(item=>item.code.toUpperCase() === code.replace(/\s/gu,"").toUpperCase()) :
+        samples[readInteger(normalized)-1];
+      if (!sample) {
+        issues.push("本场没有「"+header[0]+"」，请核对样品号。");
+        return;
+      }
+      const content = transcript.slice(header.index+header[0].length,headers[i+1]?.index).trim();
+      const parts = fragments.get(sample.code) || [];
+      parts.push(content);
+      fragments.set(sample.code,parts);
+    });
+    const rows = [...fragments].map(([code,parts])=>({code,...parse(parts.join("，"),traits,rules,{autoMatch:true})}));
+    return {rows,issues};
+  }
+
   function createRecognition({ onResult, onError, onEnd, onActivity }) {
     const Recognition = globalThis.SpeechRecognition || globalThis.webkitSpeechRecognition;
     if (!Recognition) return null;
@@ -302,5 +337,5 @@
     return recognition;
   }
 
-  globalThis.TasterVoice = Object.freeze({ parse, createRecognition });
+  globalThis.TasterVoice = Object.freeze({ parse, parseSamples, createRecognition });
 })();

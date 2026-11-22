@@ -107,10 +107,16 @@
   function findRecord(round, code = round.current) {
     return round.records.find(record => record.code === code && record.rater === round.rater);
   }
-  function draft(round) {
-    const id = key(round.current, round.rater);
+  function sampleNumber(round, code) {
+    return round.samples.findIndex(sample => sample.code === code) + 1;
+  }
+  function readScores(round, code) {
+    return round.drafts[key(code,round.rater)]?.scores ?? findRecord(round,code)?.scores ?? {};
+  }
+  function draft(round, code = round.current) {
+    const id = key(code, round.rater);
     if (!round.drafts[id]) {
-      const record = findRecord(round);
+      const record = findRecord(round,code);
       round.drafts[id] = { scores: { ...record?.scores }, note: record?.note || "",
         ...(record?.hasAudio ? { hasAudio: true } : {}) };
     }
@@ -121,26 +127,26 @@
       { name: trait, min: 1, max: 10, low: "", high: "", instructions: "" };
   }
   const valid = (value, rule = { min: 1, max: 10 }) => Number.isInteger(value) && value >= rule.min && value <= rule.max;
-  function checkedDraft(round) {
-    const entry = draft(round);
+  function checkedDraft(round, code = round.current) {
+    const entry = draft(round,code);
     for (const trait of round.traits) {
       const rule = ruleFor(round, trait);
       if (!valid(entry.scores[trait], rule)) throw Error(`请为“${trait}”填写 ${rule.min} 到 ${rule.max} 之间的整数评分。`);
     }
     return entry;
   }
-  function confirmScore(round) {
-    const entry = checkedDraft(round);
-    const found = findRecord(round);
-    const record = { code: round.current, rater: round.rater, scores: { ...entry.scores }, note: entry.note.trim(),
+  function confirmScore(round, code = round.current) {
+    const entry = checkedDraft(round,code);
+    const found = findRecord(round,code);
+    const record = { code, rater: round.rater, scores: { ...entry.scores }, note: entry.note.trim(),
       ...(entry.hasAudio ? { hasAudio: true } : {}), at: new Date().toISOString() };
     if (found) Object.assign(found, record);
     else round.records.push(record);
-    delete round.drafts[key(round.current, round.rater)];
-    const i = round.samples.findIndex(s => s.code === round.current);
+    delete round.drafts[key(code, round.rater)];
+    const i = sampleNumber(round,code)-1;
     const next = round.samples.slice(i + 1).concat(round.samples.slice(0, i)).find(s => !findRecord(round, s.code));
     if (next) round.current = next.code;
     return { record, done: !next };
   }
-  globalThis.TasterModel = { traits, defaultTemplateFor, makeRound, usesPreviousBiscuitTraits, ensureScoringRound, findRecord, draft, ruleFor, valid, checkedDraft, confirmScore };
+  globalThis.TasterModel = { traits, defaultTemplateFor, makeRound, usesPreviousBiscuitTraits, ensureScoringRound, findRecord, sampleNumber, readScores, draft, ruleFor, valid, checkedDraft, confirmScore };
 })();

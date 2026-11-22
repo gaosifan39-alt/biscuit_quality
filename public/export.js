@@ -168,9 +168,6 @@
       textCell(record.code), textCell(names.get(record.code)), textCell(record.rater ?? rater),
       ...traits.map(trait => scoreCell(record.scores?.[trait], rules.get(trait))), textCell(record.note), timeCell(record.at), textCell(title)
     ]);
-    const prefix = "application/vnd.openxmlformats-officedocument.spreadsheetml.";
-    const rels = entries => xmlDeclaration + `<Relationships xmlns="${packageRelNS}">` +
-      entries.map(([id, type, target]) => `<Relationship Id="${id}" Type="${relNS}/${type}" Target="${target}"/>`).join("") + "</Relationships>";
     const sheets = [
       ["评分明细", worksheet(headers, widths, rows)],
       ["盲码对照", worksheet(["盲码", sampleName], [14, 30], samples.map(sample => [textCell(sample.code), textCell(sample.name)]))]
@@ -186,6 +183,32 @@
         [20, 12, 12, 28, 28, 45, 20, 45, 24, 18], scaleRows
       )]);
     }
+    return workbook(sheets);
+  }
+
+  function buildScores({traits,samples,records,rater="",template}) {
+    const rules = new Map((template?.traits || []).map(rule=>[rule.name,rule]));
+    const byRater = new Map();
+    for (const record of records) {
+      const person = record.rater ?? rater;
+      if (!byRater.has(person)) byRater.set(person,new Map());
+      byRater.get(person).set(record.code,record.scores);
+    }
+    if (!byRater.size) byRater.set(rater,new Map());
+    const withRater = byRater.size > 1;
+    const headers = ["样品号",...traits,...(withRater?["评价员"]:[])];
+    const widths = [12,...traits.map(trait=>Math.max(13,trait.length*2+5)),...(withRater?[44]:[])];
+    const rows = [...byRater].flatMap(([person,ratings])=>samples.map(({code},i)=>[
+      scoreCell(i+1,{min:1,max:200}),...traits.map(trait=>scoreCell(ratings.get(code)?.[trait],rules.get(trait))),
+      ...(withRater?[textCell(person)]:[])
+    ]));
+    return workbook([["评分表",worksheet(headers,widths,rows)]]);
+  }
+
+  function workbook(sheets) {
+    const prefix = "application/vnd.openxmlformats-officedocument.spreadsheetml.";
+    const rels = entries => xmlDeclaration + `<Relationships xmlns="${packageRelNS}">` +
+      entries.map(([id, type, target]) => `<Relationship Id="${id}" Type="${relNS}/${type}" Target="${target}"/>`).join("") + "</Relationships>";
     const sheetParts = sheets.map((_, i) => `worksheets/sheet${i + 1}.xml`);
     return writeZip({
       "[Content_Types].xml": xmlDeclaration + `<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
@@ -205,5 +228,5 @@
     });
   }
 
-  globalThis.TasterExport = Object.freeze({ build, writeZip });
+  globalThis.TasterExport = Object.freeze({ build, buildScores, writeZip });
 })();
