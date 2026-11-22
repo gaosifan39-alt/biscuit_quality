@@ -186,7 +186,7 @@
     return workbook(sheets);
   }
 
-  function buildScores({traits,samples,records,rater="",template}) {
+  function buildScores({traits,samples,records,rater="",template,mapping}) {
     const rules = new Map((template?.traits || []).map(rule=>[rule.name,rule]));
     const byRater = new Map();
     for (const record of records) {
@@ -202,7 +202,11 @@
       scoreCell(i+1,{min:1,max:200}),...traits.map(trait=>scoreCell(ratings.get(code)?.[trait],rules.get(trait))),
       ...(withRater?[textCell(person)]:[])
     ]));
-    return workbook([["评分表",worksheet(headers,widths,rows)]]);
+    const sheets = [["评分表",worksheet(headers,widths,rows)]];
+    const names = samples.flatMap((_,i)=>Object.hasOwn(mapping ?? {},i+1)
+      ? [[scoreCell(i+1,{min:1,max:200}),textCell(mapping[i+1])]] : []);
+    if (names.length) sheets.push(["样品对照",worksheet(["样品号","实际品种名称"],[12,34],names)]);
+    return workbook(sheets);
   }
 
   function workbook(sheets) {

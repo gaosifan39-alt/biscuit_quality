@@ -250,12 +250,13 @@
         '<label class="field">评价员链接<input data-cloud-url readonly value="'+esc(url)+'"></label>'+
         '<div class="panel-actions">'+button("qr","下载二维码")+button("copy","复制评价链接")+button("refresh","刷新评分")+
         button("toggle",result.accepting?"暂停收评":"恢复收评")+
-        button("sharing","模板共享设置")+'</div><p class="help">模板目录 · '+esc(visibility[result.visibility] || visibility.private)+'</p>'+contents+
+        button("finish","结场与公开设置","action")+button("sharing","模板共享设置")+'</div><p class="help">共享模板 · '+esc(visibility[result.visibility] || visibility.private)+'</p>'+contents+
         (result.records.length>recent.length?'<p class="help">此处显示最近 20 条，下载文件包含全场。</p>':"")+
         '<div class="group-actions">'+button("back","我的场次")+button("export","导出本场 Excel")+
         button("zip","下载 Excel 和录音 ZIP","action")+'</div>',{
         ...play,
         back:dashboard, refresh:()=>showRound(id),
+        finish:()=>datasets.publishRound(result,()=>showRound(id)),
         sharing:()=>configureSharing(result),
         toggle:async ()=>{await rpc("set_open",{p_round:id,p_accepting:!result.accepting},true); await showRound(id);},
         qr:(_button,view)=>view.querySelector("canvas").toBlob(blob=>{if(blob) download(blob,"品鉴场次二维码.png");},"image/png"),
@@ -341,9 +342,9 @@
       useTemplate(TasterTemplates.validate(template));
     }
 
-    const mailStatus = async id => {
+    const mailStatus = async (id,kind="template") => {
       try {
-        const reply = await authenticatedRequest("/functions/v1/template-request-email",{id});
+        const reply = await authenticatedRequest("/functions/v1/template-request-email",{id,kind});
         return reply.status === "sent";
       } catch { return false; }
     };
@@ -459,7 +460,16 @@
       } else if (session?.access_token) dashboard();
       else login();
     }
-    return {open,directory};
+    const datasets = TasterDatasets.create({
+      view,connect,rpc,ready,button,esc,download,loggedIn:()=>Boolean(session?.access_token),
+      login:after=>login("",after),sendMail:id=>mailStatus(id,"dataset"),
+      manageRound:async id=>{
+        const pending = view("扫码场次",'<p class="help">正在读取场次…</p>');
+        try { await showRound(id,pending); }
+        catch (error) { pending.querySelector(".issues").textContent = error.message; }
+      }
+    });
+    return {open,directory,datasets};
   }
 
   globalThis.TasterCloud = {

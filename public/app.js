@@ -116,7 +116,8 @@
     $("#main").innerHTML = (storageError ? '<p id="storage-warning" class="inline-status" role="alert">'+esc(storageError)+'</p>' : "")+
       '<div class="page-heading"><div><h1>'+names[page]+'</h1>'+(page === "workspace" || page === "records" ? meta : "")+'</div>'+(page === "workspace" ? progress : "")+'</div>'+
       (page === "workspace" ? workspace(r) : page === "records" ? recordsPage(r) : page === "sharing" ? sharingPage(r) : communityPage());
-    if (page === "sharing") cloud.directory($("#cloud-directory"));
+    if (page === "sharing") cloud.datasets.directory($("#dataset-catalog"));
+    if (page === "community") cloud.directory($("#cloud-directory"));
   }
   function workspace(r) {
     const food = r.template?.foodType || "小麦饼干";
@@ -135,7 +136,8 @@
     const help = !guest ? "先给实物贴 1、2、3…号，品种对照由你自己保存。" : "按实物编号口述，完整的评分和录音会自动发送给主办人。";
     const countLabel = guest ? '<span>'+r.samples.length+' 份样品</span>' :
       '<button class="count-link" data-action="new-round" aria-label="设置样品数量并新建场次">'+r.samples.length+' 份样品 · 设置</button>';
-    const setup = !guest ? '<div class="panel-actions"><button class="ghost" data-action="catalog">选食品与模板</button><button class="ghost" data-action="organize">管理场次</button><button class="action" data-action="cloud">扫码收评</button></div>' : "";
+    const setup = !guest ? '<div class="panel-actions"><button class="ghost" data-action="catalog">选食品与模板</button><button class="ghost" data-action="organize">管理场次</button><button class="action" data-action="cloud">扫码收评</button>'+
+      (r.records.length?'<button class="ghost" data-action="publish-dataset">结束本场</button>':"")+'</div>' : "";
     const headings = rules.map(rule=>'<th scope="col">'+esc(rule.name)+'<small>'+esc(rule.min+"–"+rule.max+' 分')+'</small></th>').join("");
     const guide = '<details class="panel scale-guide"><summary>查看评分说明</summary><p>'+esc(r.template?.instructions || "按各项量表口述分数。")+
       '</p><dl>'+rules.map(rule=>'<div><dt>'+esc(rule.name)+'</dt><dd>'+esc(rule.min+" 分 "+(rule.low || "程度低")+" · "+rule.max+" 分 "+(rule.high || "程度高"))+
@@ -168,9 +170,9 @@
     }).reverse().join("");
     return '<section class="panel">'+header+'<div class="table-wrap"><table><thead><tr>'+columns.map(t=>'<th>'+esc(t)+'</th>').join("")+'</tr></thead><tbody>'+rows+'</tbody></table></div></section>';
   }
-  function roundPicker(r, id) {
+  function roundPicker(r, id, label="选择场次") {
     const options = state.rounds.map((s,i)=>'<option value="'+esc(s.id)+'" '+(s===r?"selected":"")+'>'+esc(s.title)+' · 场次 '+(i+1)+(M.usesPreviousBiscuitTraits(s)?" · 历史记录":"")+'</option>').join("");
-    return '<label class="field session-picker">选择场次<select id="'+id+'" data-round-picker>'+options+'</select></label>';
+    return '<label class="field session-picker">'+label+'<select id="'+id+'" data-round-picker>'+options+'</select></label>';
   }
   function organizeRound(r) {
     openModal("管理场次",roundPicker(r,"round-select")+
@@ -209,15 +211,18 @@
     status.textContent = matches ? "找到 "+matches+" 个模板" : "没有找到模板。可换个关键词，或新建模板。";
   }
   function sharingPage(r) {
-    return '<div class="settings-grid"><section class="panel setting-card"><h2 class="card-title">场次模板目录</h2><div id="cloud-directory"></div></section>'+
-      '<section class="panel setting-card"><h2 class="card-title">本机数据</h2><p class="help">分享评分汇总或数据说明卡，也可接收他人发来的共享文件。</p>'+roundPicker(r,"share-round-select")+
-      '<p class="help">'+r.records.length+' 条评价 · 原始数据保存在本机</p><div class="panel-actions"><button class="action" data-action="share-data">'+icon("share")+'分享本场数据</button>'+
-      '<button class="ghost" data-action="import-data">接收共享文件</button></div></section></div>';
+    return '<section class="panel setting-card dataset-card"><h2 class="card-title">测评数据目录</h2>'+
+      '<p class="help">在线收评和已上传的本机测评会显示在这里。</p><div id="dataset-catalog"></div></section>'+
+      '<section class="panel setting-card dataset-source"><div><h2 class="card-title">上传本机测评</h2>'+
+      '<p class="help">选择一个场次并设置公开方式。</p></div>'+
+      '<div class="dataset-source-actions">'+roundPicker(r,"share-round-select","选择本机场次")+
+      '<button class="action" data-action="publish-dataset">上传并设置公开</button>'+
+      '<button class="subtle" data-action="import-data">接收旧版共享文件</button></div></section>';
   }
   function communityPage() {
     return '<section class="panel setting-card">'+
       '<div class="panel-actions"><button class="action" data-action="blank-template">'+icon("plus")+'新建模板</button><button class="ghost" data-action="import-template">上传或导入模板</button><button class="ghost" data-action="round-template">使用本场规则</button></div>'+
-      catalogPage()+'</section>';
+      catalogPage()+'</section><details class="panel setting-card dataset-source" id="shared-template-panel"><summary>浏览共享评价模板</summary><div id="cloud-directory"></div></details>';
   }
   function openCatalog() {
     openModal("选择食品与模板",catalogPage()+'<div class="group-actions"><button class="ghost" data-action="shared-directory">浏览共享模板</button><button class="ghost" data-action="import-template">导入模板</button><button class="action" data-action="blank-template">'+icon("plus")+'新建模板</button></div>');
@@ -400,6 +405,12 @@
     const message = written ? "已填入 "+written+" 个分数。" : "这次没有识别到可填写的分数。";
     const note = written && (!blob?.size || audioLost) ? "本次有录音未保存。" : "";
     readingStatus = [message,...parsed.issues,...partial,note].filter(Boolean).join(" ");
+    if (!session.guest && complete.length && !r.datasetFinishPrompted && r.samples.every(({code})=>M.findRecord(r,code))) {
+      r.datasetFinishPrompted = true;
+      dialog.addEventListener("close",()=>{
+        if (page === "workspace" && round() === r) cloud.datasets.publishLocal(r,localScores(r),true);
+      },{once:true});
+    }
     persist();
     dialog.close();
     render();
@@ -571,7 +582,11 @@
       case "organize": organizeRound(r); break;
       case "new-round": newRoundForm(TasterTemplates.fromRound(r),{count:r.samples.length}); break;
       case "local-records": navigate("records"); break;
-      case "shared-directory": navigate("sharing"); break;
+      case "shared-directory":
+        navigate("community");
+        $("#shared-template-panel").open = true;
+        $("#shared-template-panel").scrollIntoView({block:"nearest"});
+        break;
       case "blank-template": templateEditor({ mode:"edit" }); break;
       case "round-template": templateEditor({ source:r, mode:"edit" }); break;
       case "import-template": templateEditor({ mode:"import" }); break;
@@ -581,10 +596,7 @@
         templateEditor({ initial:form.tastingTemplate, mode:"edit", formDraft:Object.fromEntries(new FormData(form)) });
         break;
       }
-      case "share-data":
-        sharing.ownerRound({...r,samples:r.samples.map(({code})=>({code})),
-          records:r.records.map(({code,rater,scores,at})=>({code,rater,scores,at}))});
-        break;
+      case "publish-dataset": cloud.datasets.publishLocal(r,localScores(r)); break;
       case "download": download(b); break;
       case "download-archive": download(b,true); break;
     }
