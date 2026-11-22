@@ -271,12 +271,12 @@
   }
 
   const errorMessages = {
-    'not-allowed': '请在浏览器中允许使用麦克风，也可以手动输入口述内容。',
-    'service-not-allowed': '浏览器未开放语音识别服务，可以使用输入法语音或手动输入。',
-    'audio-capture': '未能读取麦克风，请检查设备或使用输入法语音。',
+    'not-allowed': '请在浏览器中允许使用麦克风。',
+    'service-not-allowed': '浏览器未开放语音识别服务。',
+    'audio-capture': '未能读取麦克风，请检查设备。',
     'no-speech': '没有听清，请靠近麦克风重试。',
-    'network': '语音识别服务连接失败，请重试或使用输入法语音。',
-    'language-not-supported': '当前语音服务未提供中文识别，可以使用中文输入法语音。',
+    'network': '语音识别服务连接失败。',
+    'language-not-supported': '当前语音服务未提供中文识别。',
   };
 
   function parseSamples(text, samples, current, traits, rules) {
@@ -314,15 +314,13 @@
     return {rows,issues};
   }
 
-  function createRecognition({ onResult, onError, onEnd, onActivity }) {
+  function createRecognition({ onResult, onError, onEnd }) {
     const Recognition = globalThis.SpeechRecognition || globalThis.webkitSpeechRecognition;
     if (!Recognition) return null;
     const recognition = new Recognition();
     recognition.lang = 'zh-CN';
     recognition.continuous = true;
     recognition.interimResults = true;
-    recognition.onspeechstart = () => onActivity?.();
-    recognition.onspeechend = () => onActivity?.();
     recognition.onresult = event => {
       // Each event contains the session transcript, including revisions to interim hypotheses.
       const results = Array.from(event.results);
@@ -331,7 +329,7 @@
     };
     recognition.onerror = event => {
       if (event.error === 'aborted') return;
-      onError(errorMessages[event.error] || '语音识别暂时不可用，请重试或手动输入。');
+      onError(errorMessages[event.error] || '语音识别暂时不可用，请重试。',event.error);
     };
     recognition.onend = () => onEnd();
     return recognition;

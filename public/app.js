@@ -84,10 +84,9 @@
     const session = voiceSession;
     voiceSession = null;
     if (!session) return;
-    clearTimeout(session.pauseTimer);
-    clearTimeout(session.limitTimer);
+    clearTimeout(session.restartTimer);
     clearTimeout(session.stopTimer);
-    if (session.started && !session.ended) {
+    if (session.listening && !session.ended) {
       try { session.recognition.abort(); } catch {}
     }
     session.capture?.finish();
@@ -240,6 +239,9 @@
     clearAudioURLs();
     if (lastFocused?.isConnected) lastFocused.focus();
   });
+  dialog.addEventListener("cancel",event=>{
+    if (voiceSession?.started) event.preventDefault();
+  });
 
   function clearAudioURLs() {
     for (const url of audioURLs) URL.revokeObjectURL(url);
@@ -281,7 +283,7 @@
   function voiceEditor() {
     if (guest?.pending) return;
     const r = round();
-    openModal("口述评分",'<p class="help">报样品号，再报性状和分数。可以接着报下一个样品，停顿后自动填入。</p>'+
+    openModal("口述评分",'<p class="help">请保持<strong>语速平缓、发音清楚准确</strong>，依次报样品号、性状和分数。中途可以停下来品尝，再接着报分。说完点「结束录音」，分数会自动填入。</p>'+
       '<p class="help">'+(guest?"录音会随完整评分发送给主办人。":"原声保存在本机。")+'浏览器的语音服务可能联网处理声音。</p>'+
       '<p id="speech-feedback" class="recording-status" role="status">正在打开麦克风…</p>'+
       '<div class="group-actions"><button class="ghost" id="record-btn" data-action="stop-recording" disabled>'+icon("stop")+'结束录音</button></div>',"#record-btn");
@@ -291,35 +293,56 @@
   function requestRecordingEnd(session) {
     if (!session || voiceSession !== session || !session.started || session.ending) return;
     session.ending = true;
+    session.button.disabled = true;
+    session.feedback.textContent = "正在整理口述评分…";
+    clearTimeout(session.restartTimer);
+    if (!session.listening) { finishRecording(session); return; }
     try { session.recognition.stop(); }
     catch { finishRecording(session); return; }
     if (!session.ended) session.stopTimer = setTimeout(()=>finishRecording(session),2500);
   }
 
+  function listen(session) {
+    const {recognition,capture,feedback} = session;
+    session.listening = true;
+    try {
+      if (capture?.track) {
+        try { recognition.start(capture.track); }
+        catch { recognition.start(); }
+      } else recognition.start();
+      feedback.textContent = "正在听，可以停顿。说完请点「结束录音」。"+(session.audioWarning || "");
+    } catch {
+      session.listening = false;
+      session.error = "语音识别无法启动，请检查浏览器的麦克风权限。";
+      feedback.textContent = session.error;
+    }
+  }
+
   async function startRecording(r) {
     const feedback = $("#speech-feedback");
     const button = $("#record-btn");
-    const session = {round:r,guest,code:r.current,feedback,button,text:""};
-    const onActivity = () => {
-      if (voiceSession !== session || session.ending) return;
-      clearTimeout(session.pauseTimer);
-      session.pauseTimer = setTimeout(()=>requestRecordingEnd(session),3000);
-    };
+    const dismiss = dialog.querySelector(".close");
+    const session = {round:r,guest,code:r.current,feedback,button,dismiss,parts:[],text:""};
     const rec = TasterVoice.createRecognition({
-      onActivity,
       onResult: text => {
-        if (voiceSession !== session || session.ended) return;
-        const next = text.slice(0,8000).trim();
-        if (!next || next === session.text) return;
-        session.text = next;
-        onActivity();
+        if (voiceSession === session && session.listening && !session.ended && text.trim()) session.text = text.trim();
       },
-      onError: message => {
-        if (voiceSession !== session) return;
+      onError: (message,reason) => {
+        if (voiceSession !== session || session.ended || reason === "no-speech") return;
         session.error = message;
-        requestRecordingEnd(session);
+        if (!session.ending) feedback.textContent = message+" 点「结束录音」可填写已识别的分数。";
       },
-      onEnd: ()=>finishRecording(session)
+      onEnd: ()=>{
+        if (voiceSession !== session || session.ended) return;
+        session.listening = false;
+        if (session.ending) { finishRecording(session); return; }
+        if (session.text) session.parts.push(session.text);
+        session.text = "";
+        // The speech service can disconnect during silence while the microphone recorder keeps running.
+        if (!session.error) session.restartTimer = setTimeout(()=>{
+          if (voiceSession === session && !session.ending) listen(session);
+        },250);
+      }
     });
     if (!rec) { feedback.textContent = "此浏览器未提供语音识别。请用支持语音识别的浏览器打开。"; return; }
     session.recognition = rec;
@@ -327,34 +350,34 @@
     try { session.capture = await TasterAudio.record(); }
     catch { session.audioWarning = "原声无法录制。"; }
     if (voiceSession !== session) { session.capture?.finish(); return; }
-    try {
+    listen(session);
+    if (session.listening || session.capture) {
       session.started = true;
-      if (session.capture?.track) {
-        try { rec.start(session.capture.track); }
-        catch { rec.start(); }
-      } else rec.start();
-      session.limitTimer = setTimeout(()=>requestRecordingEnd(session),90000);
+      dismiss.hidden = true;
       button.disabled = false;
-      feedback.textContent = "正在听，停顿后自动填表。"+(session.audioWarning || "");
-    } catch {
+      button.focus();
+    } else {
       stopRecognition();
-      feedback.textContent = "麦克风启动失败。请检查浏览器的麦克风权限。";
     }
   }
 
   async function finishRecording(session) {
-    if (voiceSession !== session || session.ended) return;
+    if (voiceSession !== session || !session.ending || session.ended) return;
     session.ended = true;
-    clearTimeout(session.pauseTimer);
-    clearTimeout(session.limitTimer);
+    clearTimeout(session.restartTimer);
     clearTimeout(session.stopTimer);
-    const {round:r,text,feedback,button} = session;
+    const {round:r,feedback,button,dismiss} = session;
+    const text = [...session.parts,session.text].filter(Boolean).join("，");
+    if (session.listening) {
+      try { session.recognition.abort(); } catch {}
+    }
     button.disabled = true;
     feedback.textContent = "正在填表…";
     const blob = await session.capture?.finish().catch(()=>null);
     if (voiceSession !== session) return;
     if (!text) {
       voiceSession = null;
+      dismiss.hidden = false;
       feedback.textContent = session.error || "没有听到评分，请关掉窗口后再试一次。";
       return;
     }
